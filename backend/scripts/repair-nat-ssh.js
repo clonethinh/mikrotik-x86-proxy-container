@@ -50,7 +50,7 @@ function applyIdx(idx, wanIp) {
 
 (async () => {
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22, username: 'admin', password: 'toanthinh' }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22222, username: 'admin', password: 'toanthinh' }); });
 
   const ips = await ssh(c, '/ip/address/print where interface~"pppoe-out"');
   console.log('PPPoE IPs:\n', ips);

@@ -76,7 +76,7 @@ async function patchContainer(conn) {
 async function main() {
   console.log('=== Build assumed done — patch + restart webui ===');
   const conn = new Client();
-  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22, username: 'admin', password: 'toanthinh' }); });
+  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22222, username: 'admin', password: 'toanthinh' }); });
   await patchContainer(conn);
   conn.end();
 
@@ -97,7 +97,7 @@ async function main() {
   }
 
   const c2 = new Client();
-  await new Promise((r, j) => { c2.on('ready', r); c2.on('error', j); c2.connect({ host: HOST, port: 22, username: 'admin', password: 'toanthinh' }); });
+  await new Promise((r, j) => { c2.on('ready', r); c2.on('error', j); c2.connect({ host: HOST, port: 22222, username: 'admin', password: 'toanthinh' }); });
   console.log('\n=== NAT after repair ===');
   console.log((await sshExec(c2, '/ip/firewall/nat/print where comment~"ctn-"')).trim().slice(0, 3000));
   c2.end();

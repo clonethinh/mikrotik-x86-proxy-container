@@ -1,18 +1,15 @@
 import { Layout, Menu, Button, theme, Avatar, Dropdown, Typography, Flex, Breadcrumb, Badge, Tooltip, Divider } from 'antd';
 import DismissibleAlert from './ui/DismissibleAlert';
 import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
-import {
-  DashboardOutlined, GlobalOutlined, AuditOutlined,
-  SettingOutlined, LogoutOutlined, UserOutlined,
-  CloudServerOutlined, LaptopOutlined, ApiOutlined,
-  HomeOutlined,
-} from '@ant-design/icons';
+import { LogoutOutlined, UserOutlined, HomeOutlined } from '@ant-design/icons';
+import AppSider from './AppSider';
 import { useAuth } from '../services/auth';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useWSStore } from '../services/ws';
 import { isUiPreview } from '../lib/env';
+import { PageHeaderActionsProvider, usePageHeaderActionsState } from '../contexts/PageHeaderActionsContext';
 
-const { Header, Sider, Content } = Layout;
+const { Header, Content } = Layout;
 const { Text } = Typography;
 
 const routeMeta: Record<string, { title: string; parent?: { path: string; title: string } }> = {
@@ -25,23 +22,14 @@ const routeMeta: Record<string, { title: string; parent?: { path: string; title:
   '/settings': { title: 'Settings' },
 };
 
-export default function AppLayout() {
+function AppLayoutShell() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user, logout } = useAuth();
   const { token } = theme.useToken();
   const wsConnected = useWSStore(s => s.connected);
+  const pageActions = usePageHeaderActionsState();
   useWebSocket();
-
-  const menuItems = [
-    { key: '/dashboard', icon: <DashboardOutlined />, label: 'Dashboard' },
-    { key: '/fleet', icon: <CloudServerOutlined />, label: 'Proxy Fleet' },
-    { key: '/proxies', icon: <ApiOutlined />, label: 'Proxy chi tiết' },
-    { key: '/devices', icon: <LaptopOutlined />, label: 'Thiết bị LAN' },
-    { key: '/wan', icon: <GlobalOutlined />, label: 'WAN Control' },
-    { key: '/audit', icon: <AuditOutlined />, label: 'Audit' },
-    { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
-  ];
 
   const meta = routeMeta[location.pathname];
 
@@ -49,7 +37,7 @@ export default function AppLayout() {
     {
       title: (
         <Link to="/dashboard" className="app-breadcrumb-link">
-          <HomeOutlined />
+          <HomeOutlined className="app-breadcrumb-home-icon" />
           <span>Console</span>
         </Link>
       ),
@@ -57,33 +45,11 @@ export default function AppLayout() {
     ...(meta?.parent
       ? [{ title: <Link to={meta.parent.path}>{meta.parent.title}</Link> }]
       : []),
-    ...(meta ? [{ title: meta.title }] : []),
   ];
 
   return (
     <Layout className="app-layout-root">
-      <Sider width={248} theme="dark" breakpoint="lg" collapsedWidth={72} className="app-sider">
-        <Flex align="center" gap={12} className="app-sider-brand">
-          <div className="app-sider-logo">
-            <ApiOutlined style={{ color: '#fff', fontSize: 18 }} />
-          </div>
-          <div style={{ minWidth: 0, overflow: 'hidden' }}>
-            <div style={{ color: '#fff', fontWeight: 600, fontSize: 15, lineHeight: 1.25, whiteSpace: 'nowrap' }}>
-              MikroTik Proxy
-            </div>
-            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>RouterOS · PPPoE fleet</Text>
-          </div>
-        </Flex>
-        <Menu
-          theme="dark"
-          mode="inline"
-          className="app-sider-menu"
-          selectedKeys={[location.pathname]}
-          items={menuItems}
-          onClick={({ key }) => navigate(key)}
-          style={{ border: 'none', padding: '16px 8px' }}
-        />
-      </Sider>
+      <AppSider />
       <Layout>
         <Header className="app-main-header">
           <Flex align="center" justify="space-between" style={{ width: '100%', height: '100%' }}>
@@ -92,7 +58,13 @@ export default function AppLayout() {
               <Breadcrumb className="app-header-breadcrumb" items={breadcrumbItems} />
             </Flex>
 
-            <Flex align="center" gap={8} className="app-header-right">
+            <Flex align="center" gap={12} className="app-header-right">
+              {pageActions && (
+                <>
+                  <div className="app-header-page-actions">{pageActions}</div>
+                  <Divider type="vertical" className="app-header-divider" />
+                </>
+              )}
               <Tooltip title={wsConnected ? 'WebSocket đang kết nối' : 'WebSocket ngắt — dữ liệu có thể chậm'}>
                 <Flex align="center" gap={8} className="app-header-ws">
                   <Badge status={wsConnected ? 'processing' : 'error'} />
@@ -102,7 +74,7 @@ export default function AppLayout() {
                 </Flex>
               </Tooltip>
 
-              <Divider type="vertical" style={{ height: 24, margin: 0 }} />
+              <Divider type="vertical" className="app-header-divider" />
 
               <Dropdown
                 menu={{
@@ -144,5 +116,13 @@ export default function AppLayout() {
         </Content>
       </Layout>
     </Layout>
+  );
+}
+
+export default function AppLayout() {
+  return (
+    <PageHeaderActionsProvider>
+      <AppLayoutShell />
+    </PageHeaderActionsProvider>
   );
 }

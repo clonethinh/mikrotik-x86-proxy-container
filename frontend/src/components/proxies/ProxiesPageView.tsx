@@ -6,7 +6,7 @@ import {
   KeyOutlined, MoreOutlined, PauseCircleOutlined, PlusOutlined,
   ReloadOutlined, WarningOutlined, FileTextOutlined, GlobalOutlined, EyeOutlined, CopyOutlined,
 } from '@ant-design/icons';
-import ProxyPageShell, { ProxyCode } from '../proxy/ProxyPageShell';
+import ProxyPageShell from '../proxy/ProxyPageShell';
 import ProxyStatsRow from '../proxy/ProxyStatsRow';
 import ProxyToolbar from '../ui/ProxyToolbar';
 import AppDrawer from '../ui/AppDrawer';
@@ -17,7 +17,7 @@ import ProxiesDataTable from './ProxiesDataTable';
 import ProxyModals from './ProxyModals';
 import ProxyAnalyticsDrawer from './ProxyAnalyticsDrawer';
 import ProxyTrafficMini from './ProxyTrafficMini';
-import { HTTP_PORT_BASE, SOCKS_PORT_BASE } from '../../lib/proxyUtils';
+
 import type { ProxiesPageViewProps } from '../../hooks/useProxiesPage';
 
 const { Text } = Typography;
@@ -102,15 +102,6 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
 
   return (
     <ProxyPageShell
-      compactHeader
-      title={<><ApiOutlined style={{ marginRight: 8, color: '#1677FF' }} />Quản lý Proxy</>}
-      subtitle={(
-        <>
-          Proxy đã ghi trong DB — HTTP <ProxyCode>{HTTP_PORT_BASE}+N</ProxyCode> · SOCKS <ProxyCode>{SOCKS_PORT_BASE}+N</ProxyCode>.
-          Click dòng hoặc menu ⋯ để xem chi tiết, analytics và logs.
-        </>
-      )}
-      extra={<Button icon={<ReloadOutlined />} onClick={load}>Làm mới</Button>}
       stats={(
         <ProxyStatsRow
           items={[
@@ -154,6 +145,7 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
           )}
           actions={(
             <>
+              <Button icon={<ReloadOutlined />} onClick={load}>Làm mới</Button>
               <Dropdown
                 menu={{
                   items: [
@@ -253,7 +245,7 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
                         extHttpPort: detail.extHttpPort,
                         extSocksPort: detail.extSocksPort,
                         proxyType: detail.proxyType,
-                      }} kind="http" onCopy={copyToClipboard} />
+                      }} kind="http" onCopy={copyToClipboard} proxyId={detail.id} revealPassword={revealPassword} />
                     </div>
                   </div>
                 )}
@@ -270,7 +262,7 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
                         extHttpPort: detail.extHttpPort,
                         extSocksPort: detail.extSocksPort,
                         proxyType: detail.proxyType,
-                      }} kind="socks5" onCopy={copyToClipboard} />
+                      }} kind="socks5" onCopy={copyToClipboard} proxyId={detail.id} revealPassword={revealPassword} />
                     </div>
                   </div>
                 )}

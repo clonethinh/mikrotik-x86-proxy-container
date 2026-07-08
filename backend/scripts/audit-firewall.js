@@ -15,7 +15,7 @@ function ssh(conn, cmd) {
 
 (async () => {
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22, username: 'admin', password: 'toanthinh' }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22222, username: 'admin', password: 'toanthinh' }); });
 
   for (const cmd of [
     '/interface/pppoe-client/print',

@@ -3,7 +3,7 @@ import paramiko, os
 
 c = paramiko.SSHClient()
 c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
-c.connect('113.22.235.54', 22, 'admin', 'toanthinh', timeout=12,
+c.connect('113.22.235.54', 22222, 'admin', 'toanthinh', timeout=12,
           banner_timeout=12, auth_timeout=12,
           allow_agent=False, look_for_keys=False)
 

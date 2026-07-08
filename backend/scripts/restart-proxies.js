@@ -14,7 +14,7 @@ function exec(conn, cmd) {
 
 async function main() {
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: '113.22.235.54', port: 22, username: 'admin', password: 'toanthinh' }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: '113.22.235.54', port: 22222, username: 'admin', password: 'toanthinh' }); });
 
   console.log(await exec(c, '/container/envlist/print'));
   for (const idx of INDICES) {

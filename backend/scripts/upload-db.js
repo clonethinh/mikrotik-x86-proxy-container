@@ -13,4 +13,4 @@ c.on('ready', () => {
     rs.pipe(ws);
   });
 });
-c.connect({ host: '113.22.235.54', port: 22, username: 'admin', password: 'toanthinh' });
+c.connect({ host: '113.22.235.54', port: 22222, username: 'admin', password: 'toanthinh' });

@@ -18,7 +18,7 @@ function exec(conn, cmd, t = 120000) {
 
 async function main() {
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
 
   console.log('Remove bridge ports for veth-3p-*...');
   for (let i = 1; i <= 99; i++) {

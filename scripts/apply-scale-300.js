@@ -23,7 +23,7 @@ const PATCH_FILES = [
 const ENV =
   'NODE_ENV=production,PORT=8088,DEPLOY_TARGET=router,MIKROTIK_HOST=172.17.0.1,' +
   'MIKROTIK_API_USER=admin,MIKROTIK_API_PASS=toanthinh,MIKROTIK_REST_PORT=80,MIKROTIK_REST_SCHEME=http,' +
-  'MIKROTIK_SSH_PORT=22,MIKROTIK_SSH_USER=admin,MIKROTIK_SSH_PASS=toanthinh,' +
+  'MIKROTIK_SSH_PORT=22222,MIKROTIK_SSH_USER=admin,MIKROTIK_SSH_PASS=toanthinh,' +
   'MIKROTIK_WAN_IP=113.22.235.54,MIKROTIK_WAN_HOST=ntpcproxy.duckdns.org,' +
   'JWT_SECRET=webuiproxymikrotik-change-in-prod-32chars-x,ADMIN_USERNAME=admin,ADMIN_PASSWORD=admin123,' +
   'DATABASE_URL=file:/data/proxy.db,THREEPROXY_IMAGE=ghcr.io/tarampampam/3proxy:2,THREEPROXY_TARBALL=disk1/3proxy.tar,' +

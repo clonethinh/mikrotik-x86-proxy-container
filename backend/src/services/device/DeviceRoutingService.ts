@@ -179,7 +179,12 @@ class DeviceRoutingService {
   }
 
   async listDhcpLeases() {
-    return getMikrotikService().getDhcpLeases();
+    const { getLanTrafficForIp } = await import('../metrics/LanDeviceTrafficService');
+    const leases = await getMikrotikService().getDhcpLeases();
+    return leases.map(lease => ({
+      ...lease,
+      ...getLanTrafficForIp(lease.address),
+    }));
   }
 
   async repairAll(): Promise<void> {

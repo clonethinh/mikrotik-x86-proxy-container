@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import { Flex, Progress, Space, Tag, Typography, theme } from 'antd';
 import {
   CloudServerOutlined, GlobalOutlined,
-  ApiOutlined, HeartOutlined, WarningOutlined, CloseCircleOutlined,
+  ApiOutlined, HeartOutlined, CloseCircleOutlined,
 } from '@ant-design/icons';
 import type { DashboardData } from '../../services/api';
 
@@ -89,13 +89,13 @@ export default function DashboardFleetHero({ data, pollSec, refreshing }: Props)
               <Tag bordered={false} color={tone.status === 'success' ? 'success' : tone.status === 'exception' ? 'error' : 'warning'}>
                 {tone.label}
               </Tag>
-              <Text type="secondary" style={{ fontSize: 12 }}>Làm mới {pollSec}s</Text>
+              <Text type="secondary" style={{ fontSize: 12 }}>MikroTik live · {pollSec}s</Text>
             </Space>
             <Title level={4} style={{ margin: '6px 0 4px', fontWeight: 600 }}>
               Tình trạng hệ thống
             </Title>
             <Text type="secondary" style={{ fontSize: 13 }}>
-              {data.wanUp} WAN UP · {data.runningProxies} proxy chạy · {data.containerHealthy ?? 0} container OK
+              {data.wanUp} WAN UP · {data.runningProxies} container proxy · {data.containerHealthy ?? 0} OK trên router
             </Text>
           </div>
         </Flex>
@@ -110,8 +110,12 @@ export default function DashboardFleetHero({ data, pollSec, refreshing }: Props)
           />
           <StatusPill
             icon={<ApiOutlined />}
-            label="Proxy DB"
-            value={`${data.runningProxies}/${data.totalProxies}`}
+            label={data.errorProxies > 0 ? 'Proxy lỗi' : 'Proxy container'}
+            value={
+              data.errorProxies > 0
+                ? `${data.errorProxies} lỗi`
+                : `${data.runningProxies}/${data.totalProxies}`
+            }
             ok={hasProxies && data.errorProxies === 0 && data.runningProxies === data.totalProxies}
             warn={hasProxies && data.errorProxies === 0 && data.runningProxies < data.totalProxies}
           />
@@ -131,16 +135,9 @@ export default function DashboardFleetHero({ data, pollSec, refreshing }: Props)
         </div>
       </Flex>
 
-      {(data.errorProxies > 0 || !data.webuiRunning) && (
+      {!data.webuiRunning && (
         <Flex gap={8} wrap="wrap" className="dashboard-fleet-hero__flags">
-          {data.errorProxies > 0 && (
-            <Tag icon={<WarningOutlined />} color="error" bordered={false}>
-              {data.errorProxies} proxy lỗi
-            </Tag>
-          )}
-          {!data.webuiRunning && (
-            <Tag icon={<CloseCircleOutlined />} color="warning" bordered={false}>WebUI container down</Tag>
-          )}
+          <Tag icon={<CloseCircleOutlined />} color="warning" bordered={false}>WebUI container down</Tag>
         </Flex>
       )}
     </div>

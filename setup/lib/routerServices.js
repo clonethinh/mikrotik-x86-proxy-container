@@ -38,7 +38,7 @@ function restRequest(cfg, method, path, body) {
 }
 
 async function enableSshViaRest(cfg) {
-  const sshPort = cfg.router.sshPort || 22;
+  const sshPort = cfg.router.sshPort || 22222;
   const tries = [
     { method: 'PATCH', path: '/rest/ip/service/ssh', body: { disabled: false, port: String(sshPort) } },
     { method: 'POST', path: '/rest/ip/service/set', body: { '.id': '*ssh', disabled: false, port: String(sshPort) } },
@@ -62,7 +62,7 @@ async function enableSshViaRest(cfg) {
 }
 
 async function ensureSshEnabled(conn, cfg) {
-  const port = cfg.router.sshPort || 22;
+  const port = cfg.router.sshPort || 22222;
   await exec(conn, `/ip/service/set ssh disabled=no port=${port}`, 15_000);
   try {
     await exec(conn, '/ip/service/set www disabled=no port=80', 10_000);

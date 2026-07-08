@@ -171,7 +171,7 @@ export default function ProxiesDataTable({
       width: 108,
       render: (_: unknown, r: ProxyUser) => (
         r.proxyType !== 'socks5'
-          ? <ProxyEndpoint row={proxyRow(r)} kind="http" onCopy={onCopy} compact />
+          ? <ProxyEndpoint row={proxyRow(r)} kind="http" onCopy={onCopy} proxyId={r.id} revealPassword={onRevealPassword} compact />
           : <Text type="secondary">—</Text>
       ),
     },
@@ -181,7 +181,7 @@ export default function ProxiesDataTable({
       width: 108,
       render: (_: unknown, r: ProxyUser) => (
         r.proxyType !== 'http'
-          ? <ProxyEndpoint row={proxyRow(r)} kind="socks5" onCopy={onCopy} compact />
+          ? <ProxyEndpoint row={proxyRow(r)} kind="socks5" onCopy={onCopy} proxyId={r.id} revealPassword={onRevealPassword} compact />
           : <Text type="secondary">—</Text>
       ),
     },
@@ -247,15 +247,21 @@ export default function ProxiesDataTable({
               { key: 'edit', label: 'Sửa proxy', icon: <EditOutlined />, onClick: () => onEdit(r) },
               { type: 'divider' },
               { key: 'copy_http', label: 'Copy HTTP URL', disabled: !r.publicIp || r.proxyType === 'socks5',
-                onClick: () => onCopy(
-                  `${r.publicIp}:${r.extHttpPort}`,
-                  'Đã copy HTTP ip:port',
-                ) },
-              { key: 'copy_socks', label: 'Copy SOCKS ip:port', disabled: !r.publicIp || r.proxyType === 'http',
-                onClick: () => onCopy(
-                  `${r.publicIp}:${r.extSocksPort}`,
-                  'Đã copy SOCKS ip:port',
-                ) },
+                onClick: async () => {
+                  try {
+                    const pw = await onRevealPassword(r.id);
+                    const url = `http://${r.username}:${pw}@${r.publicIp}:${r.extHttpPort}`;
+                    onCopy(url, 'Đã copy HTTP URL');
+                  } catch { /* handled upstream */ }
+                } },
+              { key: 'copy_socks', label: 'Copy SOCKS URL', disabled: !r.publicIp || r.proxyType === 'http',
+                onClick: async () => {
+                  try {
+                    const pw = await onRevealPassword(r.id);
+                    const url = `socks5://${r.username}:${pw}@${r.publicIp}:${r.extSocksPort}`;
+                    onCopy(url, 'Đã copy SOCKS URL');
+                  } catch { /* handled upstream */ }
+                } },
               {
                 key: 'pass',
                 label: 'Copy password',

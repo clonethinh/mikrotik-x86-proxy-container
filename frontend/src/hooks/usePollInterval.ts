@@ -4,7 +4,7 @@ export const POLL_INTERVAL_OPTIONS = [1, 5, 10, 15, 30, 60] as const;
 export type PollIntervalSec = (typeof POLL_INTERVAL_OPTIONS)[number];
 
 const STORAGE_KEY = 'dashboard_poll_sec';
-const DEFAULT_SEC: PollIntervalSec = 30;
+const DEFAULT_SEC: PollIntervalSec = 5;
 
 function readStored(): PollIntervalSec {
   try {

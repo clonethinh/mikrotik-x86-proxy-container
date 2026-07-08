@@ -4,7 +4,7 @@ import ProxyPageShell from '../components/proxy/ProxyPageShell';
 import ProxyStatsRow from '../components/proxy/ProxyStatsRow';
 import ProxyToolbar from '../components/ui/ProxyToolbar';
 import {
-  AuditOutlined, UserOutlined, FileSearchOutlined, ReloadOutlined,
+  UserOutlined, FileSearchOutlined, ReloadOutlined,
 } from '@ant-design/icons';
 import { api, AuditResponse } from '../services/api';
 import { useWSEvent } from '../services/ws';
@@ -102,8 +102,6 @@ export default function AuditPage() {
 
   return (
     <ProxyPageShell
-      title={<><AuditOutlined style={{ marginRight: 8, color: '#1677FF' }} />Audit log</>}
-      subtitle="Lịch sử thao tác người dùng trên WebUI — cập nhật realtime qua WebSocket"
       stats={(
         <ProxyStatsRow
           items={[

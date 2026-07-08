@@ -70,7 +70,11 @@ export default function ProxyDetailPanel({
                 size="small"
                 className="px-port-chip px-port-chip--http"
                 icon={<CopyOutlined />}
-                onClick={() => onCopy(formatProxy(proxy, 'http'), 'Đã copy HTTP URL')}
+                onClick={() => {
+                  void onRevealPassword()
+                    .then(pw => onCopy(formatProxy({ ...proxy, password: pw }, 'http'), 'Đã copy HTTP URL'))
+                    .catch(() => {});
+                }}
               >
                 HTTP :{proxy.extHttpPort}
               </Button>
@@ -80,7 +84,11 @@ export default function ProxyDetailPanel({
                 size="small"
                 className="px-port-chip px-port-chip--socks"
                 icon={<CopyOutlined />}
-                onClick={() => onCopy(formatProxy(proxy, 'socks5'), 'Đã copy SOCKS5 URL')}
+                onClick={() => {
+                  void onRevealPassword()
+                    .then(pw => onCopy(formatProxy({ ...proxy, password: pw }, 'socks5'), 'Đã copy SOCKS5 URL'))
+                    .catch(() => {});
+                }}
               >
                 SOCKS :{proxy.extSocksPort}
               </Button>
@@ -92,7 +100,7 @@ export default function ProxyDetailPanel({
       <div className="proxies-detail-panel__body">
         <div className="proxies-detail-panel__section">
           <div className="proxies-detail-panel__section-title">Kết nối client</div>
-          <ProxyConnectionBlock proxy={proxy} onCopy={onCopy} />
+          <ProxyConnectionBlock proxy={proxy} onCopy={onCopy} revealPassword={async () => onRevealPassword()} />
         </div>
 
         <div className="proxies-detail-panel__section">

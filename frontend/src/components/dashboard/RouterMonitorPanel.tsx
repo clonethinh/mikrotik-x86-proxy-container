@@ -92,7 +92,7 @@ export default function RouterMonitorPanel({ monitor, loading, refreshSec = 30 }
       <Card className="dashboard-panel-card router-monitor-card" loading={loading}>
         <div className="router-monitor-empty">
           <DashboardOutlined style={{ fontSize: 32, color: token.colorTextQuaternary }} />
-          <Text type="secondary">Chưa có dữ liệu monitor — collector ghi mẫu mỗi 30s.</Text>
+          <Text type="secondary">Chưa có dữ liệu monitor từ MikroTik.</Text>
         </div>
       </Card>
     );
@@ -109,7 +109,10 @@ export default function RouterMonitorPanel({ monitor, loading, refreshSec = 30 }
           </span>
           <span>Router Monitor</span>
           {monitor.version && <Tag bordered={false}>{monitor.version}</Tag>}
-          <Badge status="processing" text={<Text type="secondary" style={{ fontSize: 12 }}>Live</Text>} />
+          <Tag bordered={false} color="blue">MikroTik live</Tag>
+          {monitor.live !== false && (
+            <Badge status="processing" text={<Text type="secondary" style={{ fontSize: 12 }}>Realtime</Text>} />
+          )}
         </Space>
       }
       extra={

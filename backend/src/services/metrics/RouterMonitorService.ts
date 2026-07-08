@@ -12,6 +12,8 @@ export interface RouterMonitorHistoryPoint {
 }
 
 export interface RouterMonitorSnapshot {
+  live?: boolean;
+  sampleAgeMs?: number;
   cpuLoadPct: number | null;
   memoryUsedPct: number | null;
   hddUsedPct: number | null;
@@ -36,13 +38,17 @@ export interface RouterMonitorSnapshot {
   history: RouterMonitorHistoryPoint[];
 }
 
-export async function getRouterMonitor(hours = 4): Promise<RouterMonitorSnapshot> {
+export async function getRouterMonitor(
+  hours = 4,
+  opts?: { fresh?: boolean },
+): Promise<RouterMonitorSnapshot> {
   const mik = getMikrotikService();
   const since = new Date(Date.now() - hours * 60 * 60 * 1000);
+  const now = Date.now();
 
   const [resourceRaw, containers, historyRows] = await Promise.all([
     mik.getSystemResource().catch(() => ({})),
-    mik.getContainers().catch(() => []),
+    mik.getContainers(opts).catch(() => []),
     prisma.routerResourceSample.findMany({
       where: { ts: { gte: since } },
       orderBy: { ts: 'asc' },
@@ -62,7 +68,24 @@ export async function getRouterMonitor(hours = 4): Promise<RouterMonitorSnapshot
     containerRunning: row.containerRunning,
   }));
 
+  const livePoint: RouterMonitorHistoryPoint = {
+    ts: new Date(now).toISOString(),
+    cpuLoadPct: r.cpuLoadPct,
+    memoryUsedPct: r.memoryUsedPct,
+    hddUsedPct: r.hddUsedPct,
+    containerRunning,
+  };
+  const last = history[history.length - 1];
+  if (!last || now - new Date(last.ts).getTime() > 4000) {
+    history.push(livePoint);
+  } else {
+    history[history.length - 1] = livePoint;
+  }
+  while (history.length > 500) history.shift();
+
   return {
+    live: true,
+    sampleAgeMs: 0,
     cpuLoadPct: r.cpuLoadPct,
     memoryUsedPct: r.memoryUsedPct,
     hddUsedPct: r.hddUsedPct,

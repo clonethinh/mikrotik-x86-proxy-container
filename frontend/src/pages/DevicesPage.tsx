@@ -4,7 +4,7 @@ import {
   Popconfirm, App, Card, Typography, Tooltip,
 } from 'antd';
 import ProxyToolbar from '../components/ui/ProxyToolbar';
-import ProxyPageShell, { ProxyCode } from '../components/proxy/ProxyPageShell';
+import ProxyPageShell from '../components/proxy/ProxyPageShell';
 import ProxyStatsRow from '../components/proxy/ProxyStatsRow';
 import {
   PlusOutlined, ReloadOutlined, EditOutlined, DeleteOutlined,
@@ -212,17 +212,6 @@ export default function DevicesPage() {
 
   return (
     <ProxyPageShell
-      title={<><LaptopOutlined style={{ marginRight: 8, color: '#1677FF' }} />Định tuyến thiết bị</>}
-      subtitle={(
-        <>
-          Gán thiết bị LAN (IP/MAC/DHCP) egress qua <ProxyCode>to_pppoeN</ProxyCode> — proxy HTTP/SOCKS cấu hình riêng trên client
-        </>
-      )}
-      policy={{
-        id: 'devices-routing-info',
-        message: 'Device routing vs proxy client',
-        description: 'Routing table đánh dấu traffic egress của thiết bị qua WAN chỉ định. Client vẫn cần cấu hình proxy settings nếu dùng HTTP/SOCKS.',
-      }}
       stats={(
         <ProxyStatsRow
           items={[

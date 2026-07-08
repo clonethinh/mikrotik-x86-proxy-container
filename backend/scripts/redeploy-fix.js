@@ -84,7 +84,7 @@ async function main() {
   await new Promise((res, rej) => {
     conn.on('ready', res);
     conn.on('error', rej);
-    conn.connect({ host: HOST, port: 22, username: USER, password: PASS, readyTimeout: 30000 });
+    conn.connect({ host: HOST, port: 22222, username: USER, password: PASS, readyTimeout: 30000 });
   });
   console.log('SSH OK');
 
@@ -110,7 +110,7 @@ async function main() {
     'NODE_ENV=production', 'PORT=8088', 'DEPLOY_TARGET=router',
     'MIKROTIK_HOST=172.17.0.1', `MIKROTIK_API_USER=${USER}`, `MIKROTIK_API_PASS=${PASS}`,
     'MIKROTIK_REST_PORT=80', 'MIKROTIK_REST_SCHEME=http',
-    `MIKROTIK_SSH_PORT=22`, `MIKROTIK_SSH_USER=${USER}`, `MIKROTIK_SSH_PASS=${PASS}`,
+    `MIKROTIK_SSH_PORT=22222`, `MIKROTIK_SSH_USER=${USER}`, `MIKROTIK_SSH_PASS=${PASS}`,
     `MIKROTIK_WAN_IP=${WAN_IP}`, `MIKROTIK_WAN_HOST=ntpcproxy.duckdns.org`,
     `DUCKDNS_DOMAIN=ntpcproxy.duckdns.org`, `JWT_SECRET=${JWT_SECRET}`,
     'ADMIN_USERNAME=admin', `ADMIN_PASSWORD=${ADMIN_PASS}`,

@@ -95,7 +95,7 @@ async function main() {
     'NODE_ENV=production', 'PORT=8088', 'DEPLOY_TARGET=router',
     'MIKROTIK_HOST=172.17.0.1', `MIKROTIK_API_USER=${USER}`, `MIKROTIK_API_PASS=${PASS}`,
     'MIKROTIK_REST_PORT=80', 'MIKROTIK_REST_SCHEME=http',
-    `MIKROTIK_SSH_PORT=22`, `MIKROTIK_SSH_USER=${USER}`, `MIKROTIK_SSH_PASS=${PASS}`,
+    `MIKROTIK_SSH_PORT=22222`, `MIKROTIK_SSH_USER=${USER}`, `MIKROTIK_SSH_PASS=${PASS}`,
     'MIKROTIK_WAN_IP=113.22.235.54', 'MIKROTIK_WAN_HOST=ntpcproxy.duckdns.org',
     'DUCKDNS_DOMAIN=ntpcproxy.duckdns.org',
     'JWT_SECRET=webuiproxymikrotik-change-in-prod-32chars-x',

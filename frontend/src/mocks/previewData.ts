@@ -52,35 +52,6 @@ export const mockRouterMonitor: RouterMonitorSnapshot = {
   history: buildMockRouterHistory(),
 };
 
-export const mockDashboard: DashboardData = {
-  totalProxies: 10,
-  runningProxies: 8,
-  stoppedProxies: 1,
-  errorProxies: 1,
-  totalWan: 11,
-  wanUp: 9,
-  wanDown: 2,
-  realtimeClients: 3,
-  containerProxies: 8,
-  containerHealthy: 7,
-  webuiRunning: true,
-  mikrotik: {
-    host: '192.168.88.1',
-    wanHost: 'myproxy.duckdns.org',
-    managementUrl: 'http://myproxy.duckdns.org:8088',
-    version: '7.23.1 (stable)',
-    cpuLoad: '14%',
-    freeMemory: '6.5GiB',
-    cpu: 'Intel(R)',
-    cpuCount: 2,
-    uptime: '18h44m27s',
-    boardName: 'x86 Default',
-    architecture: 'x86_64',
-  },
-  routerMonitor: mockRouterMonitor,
-  timestamp: Date.now(),
-};
-
 function mockWanRow(i: number, running: boolean): WanInfo {
   const ip = running ? `113.22.235.${50 + i}` : null;
   return {
@@ -177,11 +148,73 @@ export const mockDevices: DeviceRoute[] = [
 ];
 
 export const mockDhcpLeases: DhcpLease[] = [
-  { id: '1', address: '192.168.88.50', macAddress: 'AA:BB:CC:11:22:33', hostName: 'pc-ke-toan', status: 'bound', server: 'dhcp-lan' },
-  { id: '2', address: '192.168.88.51', macAddress: 'AA:BB:CC:DD:EE:01', hostName: 'nvr-cam', status: 'bound', server: 'dhcp-lan' },
-  { id: '3', address: '192.168.88.10', macAddress: 'DE:AD:BE:EF:00:01', hostName: 'admin-pc', status: 'bound', server: 'dhcp-lan' },
-  { id: '4', address: '192.168.88.99', macAddress: '11:22:33:44:55:66', hostName: 'phone-guest', status: 'waiting', server: 'dhcp-lan' },
+  {
+    id: '1', address: '192.168.88.50', macAddress: 'AA:BB:CC:11:22:33', hostName: 'pc-ke-toan', status: 'bound', server: 'dhcp-lan',
+    rxBytes: '2147483648', txBytes: '536870912', rxLabel: '2.0 GiB', txLabel: '512 MiB', rxBps: 1_250_000, txBps: 320_000, trafficLive: true,
+  },
+  {
+    id: '2', address: '192.168.88.51', macAddress: 'AA:BB:CC:DD:EE:01', hostName: 'nvr-cam', status: 'bound', server: 'dhcp-lan',
+    rxBytes: '8589934592', txBytes: '1073741824', rxLabel: '8.0 GiB', txLabel: '1.0 GiB', rxBps: 4_500_000, txBps: 890_000, trafficLive: true,
+  },
+  {
+    id: '3', address: '192.168.88.10', macAddress: 'DE:AD:BE:EF:00:01', hostName: 'admin-pc', status: 'bound', server: 'dhcp-lan',
+    rxBytes: '104857600', txBytes: '52428800', rxLabel: '100 MiB', txLabel: '50 MiB', rxBps: 45_000, txBps: 12_000, trafficLive: true,
+  },
+  {
+    id: '4', address: '192.168.88.99', macAddress: '11:22:33:44:55:66', hostName: 'phone-guest', status: 'waiting', server: 'dhcp-lan',
+    rxBytes: '0', txBytes: '0', rxLabel: '—', txLabel: '—', rxBps: 0, txBps: 0, trafficLive: false,
+  },
 ];
+
+export const mockDashboard: DashboardData = {
+  totalProxies: 10,
+  runningProxies: 8,
+  stoppedProxies: 1,
+  errorProxies: 1,
+  totalWan: 11,
+  wanUp: 9,
+  wanDown: 2,
+  realtimeClients: 3,
+  containerProxies: 8,
+  containerHealthy: 7,
+  webuiRunning: true,
+  mikrotik: {
+    host: '192.168.88.1',
+    wanHost: 'myproxy.duckdns.org',
+    managementUrl: 'http://myproxy.duckdns.org:8088',
+    version: '7.23.1 (stable)',
+    cpuLoad: '14%',
+    freeMemory: '6.5GiB',
+    cpu: 'Intel(R)',
+    cpuCount: 2,
+    uptime: '18h44m27s',
+    boardName: 'x86 Default',
+    architecture: 'x86_64',
+  },
+  routerMonitor: { ...mockRouterMonitor, live: true, sampleAgeMs: 0 },
+  wanTraffic: {
+    rxBytes: '12884901888',
+    txBytes: '5368709120',
+    rxLabel: '12.0 GB',
+    txLabel: '5.0 GB',
+    rxBps: 4_200_000,
+    txBps: 1_100_000,
+    wanUp: 9,
+    wanTotal: 11,
+    sampleAgeMs: 1200,
+    live: true,
+    history: Array.from({ length: 24 }, (_, i) => ({
+      ts: new Date(Date.now() - (23 - i) * 5000).toISOString(),
+      rxBps: 2_000_000 + Math.round(Math.sin(i / 3) * 800_000),
+      txBps: 800_000 + Math.round(Math.cos(i / 4) * 300_000),
+    })),
+  },
+  live: true,
+  source: 'mikrotik',
+  dhcpLeases: mockDhcpLeases,
+  deviceRoutes: mockDevices,
+  timestamp: Date.now(),
+};
 
 export const mockAudit: AuditItem[] = [
   { id: 1, username: 'admin', action: 'login', resource: null, resourceId: null, details: null, ip: '192.168.88.10', proxyId: null, createdAt: new Date().toISOString() },

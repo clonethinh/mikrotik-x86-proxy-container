@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Button, Flex, Tag, Tooltip, Typography } from 'antd';
 import { CopyOutlined, LinkOutlined } from '@ant-design/icons';
 import { formatProxy, type ProxyEndpointRow } from '../lib/proxyUtils';
@@ -8,6 +9,9 @@ interface Props {
   row: ProxyEndpointRow;
   kind: 'http' | 'socks5';
   onCopy: (text: string, label?: string) => void;
+  /** Khi API list không trả password — fetch qua /api/proxies/:id/password */
+  proxyId?: number;
+  revealPassword?: (id: number) => Promise<string>;
   compact?: boolean;
 }
 
@@ -16,25 +20,62 @@ const KIND_META = {
   socks5: { label: 'SOCKS5', color: 'magenta' as const, chipClass: 'proxy-endpoint-chip proxy-endpoint-chip--socks' },
 };
 
-export default function ProxyEndpoint({ row, kind, onCopy, compact }: Props) {
+async function resolveProxyUrl(
+  row: ProxyEndpointRow,
+  kind: 'http' | 'socks5',
+  proxyId?: number,
+  revealPassword?: (id: number) => Promise<string>,
+): Promise<string> {
+  let password = row.password;
+  if (!password && proxyId != null && revealPassword) {
+    password = await revealPassword(proxyId);
+  }
+  return formatProxy({ ...row, password }, kind);
+}
+
+export default function ProxyEndpoint({
+  row,
+  kind,
+  onCopy,
+  proxyId,
+  revealPassword,
+  compact,
+}: Props) {
+  const [copying, setCopying] = useState(false);
   const ip = row.publicIp;
   const port = kind === 'http' ? row.extHttpPort : row.extSocksPort;
   const meta = KIND_META[kind];
+
+  const handleCopy = async () => {
+    if (!ip || !port) return;
+    setCopying(true);
+    try {
+      const url = await resolveProxyUrl(row, kind, proxyId, revealPassword);
+      if (!url) {
+        onCopy('', 'Thiếu thông tin proxy');
+        return;
+      }
+      onCopy(url, `Đã copy ${meta.label} URL`);
+    } catch {
+      onCopy('', 'Không lấy được password');
+    } finally {
+      setCopying(false);
+    }
+  };
 
   if (!ip || !port) {
     return <Text type="secondary" style={{ fontSize: 12 }}>Chờ IP</Text>;
   }
 
-  const url = formatProxy(row as Parameters<typeof formatProxy>[0], kind);
-
   if (compact) {
     return (
-      <Tooltip title={url}>
+      <Tooltip title="Copy connection URL">
         <Button
           size="small"
           type={kind === 'http' ? 'primary' : 'default'}
           icon={<CopyOutlined />}
-          onClick={() => onCopy(url, `Đã copy ${meta.label}`)}
+          loading={copying}
+          onClick={() => void handleCopy()}
           style={
             kind === 'socks5'
               ? { borderColor: '#EB2F96', color: '#C41D7F' }
@@ -61,7 +102,8 @@ export default function ProxyEndpoint({ row, kind, onCopy, compact }: Props) {
         size="small"
         type="default"
         icon={<CopyOutlined />}
-        onClick={() => onCopy(url, `Đã copy ${meta.label} URL`)}
+        loading={copying}
+        onClick={() => void handleCopy()}
         block
       >
         Copy connection URL

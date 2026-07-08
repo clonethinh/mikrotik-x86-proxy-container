@@ -6,7 +6,7 @@ import DismissibleAlert from '../ui/DismissibleAlert';
 const { Text } = Typography;
 
 export interface ProxyPageShellProps {
-  title: ReactNode;
+  title?: ReactNode;
   subtitle?: ReactNode;
   extra?: ReactNode;
   policy?: { id: string; message: string; description?: ReactNode };
@@ -47,12 +47,14 @@ export default function ProxyPageShell({
 
   return (
     <div className={pageClass}>
-      <PageHeader
-        title={title}
-        subtitle={subtitle}
-        extra={extra}
-        compact={compactHeader}
-      />
+      {title ? (
+        <PageHeader
+          title={title}
+          subtitle={subtitle}
+          extra={extra}
+          compact={compactHeader}
+        />
+      ) : null}
 
       {policy && (
         <DismissibleAlert

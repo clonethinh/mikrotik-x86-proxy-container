@@ -22,7 +22,7 @@ function sftpPut(conn, local, remote) {
 
 async function main() {
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
   await sftpPut(c, dbLocal, '/disk1/data/proxy.db');
   console.log('Uploaded proxy.db');
   c.end();

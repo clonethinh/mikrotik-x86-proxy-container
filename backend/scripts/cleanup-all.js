@@ -52,7 +52,7 @@ async function main() {
   await new Promise((res, rej) => {
     conn.on('ready', res);
     conn.on('error', rej);
-    conn.connect({ host: HOST, port: 22, username: USER, password: PASS, readyTimeout: 20000 });
+    conn.connect({ host: HOST, port: 22222, username: USER, password: PASS, readyTimeout: 20000 });
   });
   console.log('=== ROUTER CLEANUP ===\n');
 

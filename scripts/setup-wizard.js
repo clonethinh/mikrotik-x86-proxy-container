@@ -96,7 +96,7 @@ async function main() {
     if (doNetwork) {
       console.log('\n--- Quét cổng ethernet trên router ---');
       try {
-        etherPorts = await discoverPorts(host, 'admin', sshPass, 22);
+        etherPorts = await discoverPorts(host, 'admin', sshPass, 22222);
       } catch (e) {
         console.log(`  Không quét được (${e.message}) — nhập tay bên dưới`);
       }

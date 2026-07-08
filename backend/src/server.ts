@@ -28,6 +28,8 @@ import { startHealthMonitor, stopHealthMonitor } from './services/realtime/Healt
 import { startProxyMetricsCollector, stopProxyMetricsCollector } from './services/metrics/ProxyMetricsCollector';
 import { startRollupAggregator, stopRollupAggregator } from './services/metrics/RollupAggregator';
 import { startRouterResourceCollector, stopRouterResourceCollector } from './services/metrics/RouterResourceCollector';
+import { startRouterTrafficCollector, stopRouterTrafficCollector } from './services/metrics/RouterTrafficService';
+import { startLanDeviceTrafficCollector, stopLanDeviceTrafficCollector } from './services/metrics/LanDeviceTrafficService';
 import { startLogTailer, stopLogTailer } from './services/logs/LogTailer';
 import { startTopDomainAggregator, stopTopDomainAggregator } from './services/logs/TopDomainAggregator';
 import { startClockSyncOnBoot } from './services/system/ClockSyncService';
@@ -38,8 +40,15 @@ async function buildServer() {
   const app = Fastify({
     loggerInstance: logger,
     trustProxy: true,
-    bodyLimit: 5 * 1024 * 1024,
+    bodyLimit: 1024 * 1024 * 1024,
   });
+
+  // Docker image upload (redeploy-webui) — stream raw body
+  app.addContentTypeParser(
+    'application/octet-stream',
+    { parseAs: 'buffer', bodyLimit: 1024 * 1024 * 1024 },
+    (_req, body, done) => done(null, body),
+  );
 
   // POST không body (vd. /api/wan/2/enable) — frontend fetch không gửi JSON;
   // tránh FST_ERR_CTP_EMPTY_JSON_BODY khi client vẫn set Content-Type: application/json
@@ -158,6 +167,8 @@ async function main() {
     startHealthMonitor();
     startProxyMetricsCollector();
     startRouterResourceCollector();
+    startRouterTrafficCollector();
+    startLanDeviceTrafficCollector();
     startRollupAggregator();
     startLogTailer();
     startTopDomainAggregator();
@@ -242,6 +253,8 @@ async function main() {
       stopHealthMonitor();
       stopProxyMetricsCollector();
       stopRouterResourceCollector();
+      stopRouterTrafficCollector();
+      stopLanDeviceTrafficCollector();
       stopRollupAggregator();
       stopLogTailer();
       stopTopDomainAggregator();

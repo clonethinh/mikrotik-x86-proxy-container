@@ -270,7 +270,7 @@ export default function FleetPage() {
       key: 'http',
       width: 108,
       render: (_: unknown, r: FleetRow) => (
-        <ProxyEndpoint row={r} kind="http" onCopy={copy} compact />
+        <ProxyEndpoint row={r} kind="http" onCopy={copy} proxyId={r.proxyId ?? undefined} revealPassword={revealPassword} compact />
       ),
     },
     {
@@ -278,7 +278,7 @@ export default function FleetPage() {
       key: 'socks',
       width: 108,
       render: (_: unknown, r: FleetRow) => (
-        <ProxyEndpoint row={r} kind="socks5" onCopy={copy} compact />
+        <ProxyEndpoint row={r} kind="socks5" onCopy={copy} proxyId={r.proxyId ?? undefined} revealPassword={revealPassword} compact />
       ),
     },
     {
@@ -382,13 +382,6 @@ export default function FleetPage() {
 
   return (
     <ProxyPageShell
-      title={<><CloudServerOutlined style={{ marginRight: 8, color: '#1677FF' }} />Proxy Fleet</>}
-      subtitle={
-        <>
-          Mỗi <ProxyCode>pppoe-outN</ProxyCode> là một egress IP động + container 3proxy.
-          HTTP <ProxyCode>{HTTP_PORT_BASE}+N</ProxyCode> · SOCKS <ProxyCode>{SOCKS_PORT_BASE}+N</ProxyCode>
-        </>
-      }
       policy={{
         id: 'fleet-pool-rotation',
         message: 'Pool rotation & auto-provision',
@@ -526,13 +519,13 @@ export default function FleetPage() {
                 <div>
                   <Text type="secondary" style={{ fontSize: 12 }}>HTTP</Text>
                   <div style={{ marginTop: 6 }}>
-                    <ProxyEndpoint row={detailRow} kind="http" onCopy={copy} />
+                    <ProxyEndpoint row={detailRow} kind="http" onCopy={copy} proxyId={detailRow.proxyId ?? undefined} revealPassword={revealPassword} />
                   </div>
                 </div>
                 <div>
                   <Text type="secondary" style={{ fontSize: 12 }}>SOCKS5</Text>
                   <div style={{ marginTop: 6 }}>
-                    <ProxyEndpoint row={detailRow} kind="socks5" onCopy={copy} />
+                    <ProxyEndpoint row={detailRow} kind="socks5" onCopy={copy} proxyId={detailRow.proxyId ?? undefined} revealPassword={revealPassword} />
                   </div>
                 </div>
               </Flex>

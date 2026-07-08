@@ -1,10 +1,10 @@
 # ============================================================
-# ensure-ssh-port.rsc — SSH port 22222 (giảm bot scan port 22)
+# ensure-ssh-port.rsc — SSH port 22222 (WAN management)
 # Cập nhật: service, RAW mgmt, filter accept WAN
 # ============================================================
 
 :local sshPort 22222
-:local oldComment "INPUT: Allow port 22 (SSH) from WAN"
+:local oldComment "INPUT: Allow port 22 (SSH) from WAN"  ;# legacy — chỉ remove, không dùng nữa
 :local newComment "INPUT: Allow port 22222 (SSH) from WAN"
 :local mgmtPorts "8088,22222,80,443,8291"
 

@@ -75,7 +75,7 @@ async function main() {
   console.log('REPAIR FLEET out2-out5\n');
 
   const conn = new Client();
-  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
 
   for (const idx of [2, 3, 4, 5]) await cleanup(conn, idx);
 
@@ -120,7 +120,7 @@ async function main() {
   }
 
   const conn2 = new Client();
-  await new Promise((r, j) => { conn2.on('ready', r); conn2.on('error', j); conn2.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { conn2.on('ready', r); conn2.on('error', j); conn2.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
   console.log('\n=== containers ===');
   console.log((await sshExec(conn2, '/container/print')).trim());
   console.log('\n=== users files ===');

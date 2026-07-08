@@ -230,7 +230,7 @@ async function main() {
   run('npm run build', path.join(ROOT, 'frontend'));
 
   const conn = new Client();
-  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
   console.log('SSH OK');
 
   await cleanupLegacy(conn);

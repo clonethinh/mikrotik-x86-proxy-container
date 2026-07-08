@@ -70,7 +70,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function main() {
   const conn = new Client();
-  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { conn.on('ready', r); conn.on('error', j); conn.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
   console.log('SSH OK — uploading patches...\n');
 
   for (const [localRel, remoteApp] of FILES) {

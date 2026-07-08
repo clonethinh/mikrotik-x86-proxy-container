@@ -25,7 +25,7 @@ async function main() {
   await new Promise((r, j) => {
     c.on('ready', r);
     c.on('error', j);
-    c.connect({ host: HOST, port: 22, username: USER, password: PASS, readyTimeout: 30000 });
+    c.connect({ host: HOST, port: 22222, username: USER, password: PASS, readyTimeout: 30000 });
   });
   console.log('SSH OK\n');
 

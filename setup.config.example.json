@@ -3,7 +3,7 @@
     "host": "192.168.88.1",
     "sshUser": "admin",
     "sshPass": "CHANGE_ME",
-    "sshPort": 22
+    "sshPort": 22222
   },
   "wan": {
     "host": "your-router.duckdns.org",

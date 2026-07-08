@@ -10,6 +10,12 @@
     "setup:skip-build": "setup.bat --skip-build",
     "build": "node setup/steps/build.js",
     "build:3proxy-hub": "bash scripts/build-3proxy-hub.sh",
-    "deploy": "setup.bat"
+    "deploy": "setup.bat",
+    "deploy:wan": "node scripts/deploy-via-rest.js",
+    "deploy:auto": "node scripts/deploy-auto.js",
+    "cleanup:disk1": "node scripts/cleanup-disk1.js",
+    "deploy:bootstrap": "node scripts/bootstrap-redeploy-via-rest.js",
+    "cleanup:firewall": "node scripts/cleanup-firewall-redundant.js",
+    "restore:webui": "node scripts/restore-webui-bootstrap-http.js"
   }
 }

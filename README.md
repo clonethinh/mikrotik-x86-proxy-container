@@ -161,7 +161,7 @@ MIK_PASS=toanthinh ./scripts/upload-to-mikrotik.sh
 
 Bước 2: Chạy install-all trên Mikrotik
 ```bash
-ssh admin@<mikrotik>
+ssh -p 22222 admin@<mikrotik>
 /import file=disk1/webuiproxymikrotik/install-all.rsc
 ```
 → Tạo bridge, veth, routing tables, mangle, NAT rules, firewall. **Idempotent**, chạy lại OK.
@@ -171,15 +171,16 @@ Bước 3: Build image webui
 cd webuiproxymikrotik
 docker buildx build --platform linux/amd64 -t webuiproxymikrotik:latest .
 docker save webuiproxymikrotik:latest > webuiproxymikrotik.tar
-scp webuiproxymikrotik.tar admin@<mikrotik>:/disk1/
+scp -P 22222 webuiproxymikrotik.tar admin@<mikrotik>:/disk1/
 ```
 
 Bước 4: Tạo container webui trên Mikrotik
 ```bash
-ssh admin@<mikrotik>
+ssh -p 22222 admin@<mikrotik>
 /container/envlist/add name=ENV_WEBUI key=MIKROTIK_HOST value="127.0.0.1"
 /container/envlist/add name=ENV_WEBUI key=MIKROTIK_API_USER value="admin"
 /container/envlist/add name=ENV_WEBUI key=MIKROTIK_API_PASS value="toanthinh"
+/container/envlist/add name=ENV_WEBUI key=MIKROTIK_SSH_PORT value="22222"
 /container/envlist/add name=ENV_WEBUI key=MIKROTIK_SSH_PASS value="toanthinh"
 /container/envlist/add name=ENV_WEBUI key=MIKROTIK_WAN_IP value="113.22.235.52"
 /container/envlist/add name=ENV_WEBUI key=JWT_SECRET value="change-me-in-prod"

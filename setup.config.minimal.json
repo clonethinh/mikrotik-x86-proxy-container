@@ -3,7 +3,7 @@
     "host": "CHANGE_HOST",
     "sshUser": "admin",
     "sshPass": "CHANGE_ME",
-    "sshPort": 22
+    "sshPort": 22222
   },
   "wan": {
     "host": "CHANGE_HOST.duckdns.org",

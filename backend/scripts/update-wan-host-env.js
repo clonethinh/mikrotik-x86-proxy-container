@@ -21,13 +21,13 @@ function exec(conn, cmd, t = 120000) {
 
 async function main() {
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
 
   const env = [
     'NODE_ENV=production', 'PORT=8088', 'DEPLOY_TARGET=router',
     'MIKROTIK_HOST=172.17.0.1', `MIKROTIK_API_USER=${USER}`, `MIKROTIK_API_PASS=${PASS}`,
     'MIKROTIK_REST_PORT=80', 'MIKROTIK_REST_SCHEME=http',
-    `MIKROTIK_SSH_USER=${USER}`, `MIKROTIK_SSH_PASS=${PASS}`, 'MIKROTIK_SSH_PORT=22',
+    `MIKROTIK_SSH_USER=${USER}`, `MIKROTIK_SSH_PASS=${PASS}`, 'MIKROTIK_SSH_PORT=22222',
     `MIKROTIK_WAN_HOST=${WAN_HOST}`,
     'JWT_SECRET=webuiproxymikrotik-change-in-prod-32chars-x',
     'ADMIN_USERNAME=admin', 'ADMIN_PASSWORD=admin123',

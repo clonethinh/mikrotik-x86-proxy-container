@@ -46,7 +46,7 @@ function httpJson(method, path, body, token) {
 (async () => {
   console.log('=== ROUTER PPPoE ===');
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
   console.log((await sshExec(c, '/interface/pppoe-client/print')).trim());
   console.log('\n=== pppoe-out2 IP ===');
   console.log((await sshExec(c, '/ip/address/print where interface=pppoe-out2')).trim() || '(no IP yet)');

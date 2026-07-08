@@ -33,4 +33,4 @@ c.on('ready', async () => {
     console.log('');
   }
   c.end();
-}).connect({ host, port: 22, username: 'admin', password: 'toanthinh', readyTimeout: 20000 });
+}).connect({ host, port: 22222, username: 'admin', password: 'toanthinh', readyTimeout: 20000 });

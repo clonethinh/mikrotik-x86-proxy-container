@@ -16,6 +16,20 @@ import {
   HUB_ROUTER_ADDRESS_LIST,
   hubShardSubnet,
 } from '../../lib/hubUtils';
+import {
+  isValidLanIpv4,
+  LAN_STATS_CONN_MARK,
+  LAN_STATS_DL_COMMENT_PREFIX,
+  LAN_STATS_MARK_DST_PREFIX,
+  LAN_STATS_MARK_SRC_PREFIX,
+  LAN_STATS_RULE_COMMENT_RE,
+  LAN_STATS_UL_COMMENT_PREFIX,
+  lanStatsDlComment,
+  lanStatsIpFromComment,
+  lanStatsMarkDstComment,
+  lanStatsMarkSrcComment,
+  lanStatsUlComment,
+} from '../../lib/lanTrafficUtils';
 
 export interface MikrotikCredentials {
   host: string;
@@ -97,6 +111,13 @@ export interface ContainerInfo {
   tag?: string;
   interface?: string;
   env?: string;
+}
+
+export interface PppoeTrafficCounter {
+  name: string;
+  running: boolean;
+  rxBytes: bigint;
+  txBytes: bigint;
 }
 
 type RestCacheEntry<T> = { at: number; data: T };
@@ -562,6 +583,31 @@ export class MikrotikService {
     }
   }
 
+  /** Cumulative rx/tx byte counters on all PPPoE WAN interfaces (pppoe-wan + pppoe-out*). */
+  async getPppoeTrafficCounters(): Promise<PppoeTrafficCounter[]> {
+    const [outRaw, wanRaw] = await Promise.all([
+      this.restGet('/rest/interface?type=pppoe-out').catch(() => []),
+      this.restGet('/rest/interface?name=pppoe-wan').catch(() => []),
+    ]);
+    const rows: unknown[] = [];
+    if (Array.isArray(outRaw)) rows.push(...outRaw);
+    if (Array.isArray(wanRaw)) rows.push(...wanRaw);
+
+    const out: PppoeTrafficCounter[] = [];
+    for (const r of rows) {
+      const row = r as Record<string, unknown>;
+      const name = String(row.name || '');
+      if (!name.startsWith('pppoe-')) continue;
+      out.push({
+        name,
+        running: row.running === true || row.running === 'true',
+        rxBytes: BigInt(String(row['rx-byte'] ?? 0)),
+        txBytes: BigInt(String(row['tx-byte'] ?? 0)),
+      });
+    }
+    return out;
+  }
+
   async getSystemResource(): Promise<any> {
     try {
       const raw = await this.restGet('/rest/system/resource');
@@ -756,6 +802,108 @@ export class MikrotikService {
       `/ip/firewall/mangle/remove [find comment=${comment}]`,
       10_000,
     ).catch(() => {});
+  }
+
+  // ============ LAN per-host traffic stats (mangle passthrough counters) ============
+
+  /** Per-LAN-host traffic counters: forward mangle + conn-mark (FastTrack bỏ qua marked flows). */
+  async syncLanStatsMangleRules(ips: string[]): Promise<void> {
+    const unique = [...new Set(ips.filter(isValidLanIpv4))];
+    const wantIps = new Set(unique);
+
+    await this.sshExec(
+      `:do {/ip firewall filter set [find where action=fasttrack-connection] connection-mark=no-mark connection-state=established,related} on-error={}`,
+      10_000,
+    ).catch(() => {});
+
+    for (const ip of unique) {
+      const ul = lanStatsUlComment(ip);
+      const dl = lanStatsDlComment(ip);
+      const markSrc = lanStatsMarkSrcComment(ip);
+      const markDst = lanStatsMarkDstComment(ip);
+      const block = [
+        `:if ([:len [/ip/firewall/mangle/find where comment="${markSrc}"]] = 0) do={` +
+        `/ip/firewall/mangle/add chain=prerouting action=mark-connection new-connection-mark=${LAN_STATS_CONN_MARK} passthrough=yes src-address=${ip} comment="${markSrc}"` +
+        `}`,
+        `:if ([:len [/ip/firewall/mangle/find where comment="${markDst}"]] = 0) do={` +
+        `/ip/firewall/mangle/add chain=prerouting action=mark-connection new-connection-mark=${LAN_STATS_CONN_MARK} passthrough=yes dst-address=${ip} comment="${markDst}"` +
+        `}`,
+        `:if ([:len [/ip/firewall/mangle/find where comment="${ul}"]] = 0) do={` +
+        `/ip/firewall/mangle/add chain=forward action=accept passthrough=yes src-address=${ip} comment="${ul}"` +
+        `}`,
+        `:if ([:len [/ip/firewall/mangle/find where comment="${dl}"]] = 0) do={` +
+        `/ip/firewall/mangle/add chain=forward action=accept passthrough=yes dst-address=${ip} comment="${dl}"` +
+        `}`,
+        `:foreach r in=[/ip/firewall/mangle/find where comment="${ul}"] do={ :if ([/ip/firewall/mangle/get $r chain] = "prerouting") do={ /ip/firewall/mangle/remove $r } }`,
+        `:foreach r in=[/ip/firewall/mangle/find where comment="${dl}"] do={ :if ([/ip/firewall/mangle/get $r chain] = "prerouting") do={ /ip/firewall/mangle/remove $r } }`,
+      ].join('\n');
+      await this.sshExec(block, 15_000).catch(() => {});
+    }
+
+    const raw = await this.restGet('/rest/ip/firewall/mangle').catch(() => []);
+    if (!Array.isArray(raw)) return;
+
+    const extractIp = (comment: string): string => {
+      if (comment.startsWith(LAN_STATS_UL_COMMENT_PREFIX)) {
+        return lanStatsIpFromComment(comment, LAN_STATS_UL_COMMENT_PREFIX);
+      }
+      if (comment.startsWith(LAN_STATS_DL_COMMENT_PREFIX)) {
+        return lanStatsIpFromComment(comment, LAN_STATS_DL_COMMENT_PREFIX);
+      }
+      if (comment.startsWith(LAN_STATS_MARK_SRC_PREFIX)) {
+        return lanStatsIpFromComment(comment, LAN_STATS_MARK_SRC_PREFIX);
+      }
+      if (comment.startsWith(LAN_STATS_MARK_DST_PREFIX)) {
+        return lanStatsIpFromComment(comment, LAN_STATS_MARK_DST_PREFIX);
+      }
+      return '';
+    };
+
+    await Promise.all(
+      raw
+        .filter((row: Record<string, unknown>) => {
+          const c = String(row.comment || '');
+          if (!c.match(new RegExp(LAN_STATS_RULE_COMMENT_RE))) return false;
+          const ip = extractIp(c);
+          return !ip || !wantIps.has(ip);
+        })
+        .map(row => {
+          const id = row['.id'];
+          if (!id) return Promise.resolve();
+          return this.restDelete(`/rest/ip/firewall/mangle/${encodeURIComponent(String(id))}`).catch(() => {});
+        }),
+    );
+  }
+
+  /** Read cumulative upload (tx) / download (rx) bytes per LAN host IP from mangle counters. */
+  async getLanMangleTrafficCounters(): Promise<Map<string, { rxBytes: bigint; txBytes: bigint }>> {
+    const raw = await this.restGet('/rest/ip/firewall/mangle').catch(() => []);
+    const map = new Map<string, { rxBytes: bigint; txBytes: bigint }>();
+    if (!Array.isArray(raw)) return map;
+
+    for (const row of raw) {
+      const r = row as Record<string, unknown>;
+      const comment = String(r.comment || '');
+      let ip = '';
+      let dir: 'rx' | 'tx' | null = null;
+      if (comment.startsWith(LAN_STATS_DL_COMMENT_PREFIX)) {
+        ip = lanStatsIpFromComment(comment, LAN_STATS_DL_COMMENT_PREFIX);
+        dir = 'rx';
+      } else if (comment.startsWith(LAN_STATS_UL_COMMENT_PREFIX)) {
+        ip = lanStatsIpFromComment(comment, LAN_STATS_UL_COMMENT_PREFIX);
+        dir = 'tx';
+      }
+      if (!ip || !dir || !isValidLanIpv4(ip)) continue;
+      // Chỉ đếm rule forward (bỏ prerouting legacy nếu còn)
+      if (String(r.chain || '') !== 'forward') continue;
+
+      const bytes = BigInt(String(r.bytes ?? 0));
+      const cur = map.get(ip) ?? { rxBytes: 0n, txBytes: 0n };
+      if (dir === 'rx') cur.rxBytes = bytes;
+      else cur.txBytes = bytes;
+      map.set(ip, cur);
+    }
+    return map;
   }
 }
 

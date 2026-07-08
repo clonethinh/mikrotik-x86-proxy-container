@@ -9,8 +9,8 @@ set -e
 MIK_HOST="${MIK_HOST:-ntpcproxy.duckdns.org}"
 MIK_USER="${MIK_USER:-admin}"
 MIK_PASS="${MIK_PASS:-toanthinh}"
-WAN_IP="${WAN_IP:-113.22.235.54}"
-SSH_PORT="${SSH_PORT:-22}"
+WAN_IP="${WAN_IP:-42.119.198.233}"
+SSH_PORT="${SSH_PORT:-22222}"
 ADMIN_PASS="${ADMIN_PASS:-admin123}"
 JWT_SECRET="${JWT_SECRET:-webuiproxymikrotik-change-in-prod-32chars-x}"
 
@@ -25,6 +25,7 @@ cd "$ROOT_DIR"
 
 # SSH options (Mikrotik cũ dùng diffie-hellman-group1-sha1)
 SSH_OPTS=(
+  -p "$SSH_PORT"
   -o StrictHostKeyChecking=no
   -o KexAlgorithms=+diffie-hellman-group1-sha1
   -o HostKeyAlgorithms=+ssh-rsa
@@ -55,7 +56,15 @@ echo "  Built: $TAR_NAME ($TAR_SIZE)"
 # ============ STEP 3: SCP .tar lên Mikrotik ============
 echo ""
 echo "=== STEP 3: Upload .tar to /disk1/ ==="
-sshpass -p "$MIK_PASS" scp "${SSH_OPTS[@]}" \
+SCP_OPTS=(
+  -P "$SSH_PORT"
+  -o StrictHostKeyChecking=no
+  -o KexAlgorithms=+diffie-hellman-group1-sha1
+  -o HostKeyAlgorithms=+ssh-rsa
+  -o PubkeyAcceptedKeyTypes=+ssh-rsa
+  -o ConnectTimeout=15
+)
+sshpass -p "$MIK_PASS" scp "${SCP_OPTS[@]}" \
   "$TAR_NAME" "$MIK_USER@$MIK_HOST:/disk1/$TAR_NAME"
 
 # ============ STEP 4: Stop + remove container cũ ============

@@ -16,13 +16,21 @@ function loadConfig() {
   if (!raw.router?.host || !raw.router?.sshPass || raw.router.sshPass === 'CHANGE_ME') {
     throw new Error('setup.config.json: điền router.host và router.sshPass');
   }
+  let sshPort = raw.router.sshPort || 22222;
+  try {
+    const accessPath = path.join(ROOT, 'router-access.json');
+    if (fs.existsSync(accessPath)) {
+      const access = JSON.parse(fs.readFileSync(accessPath, 'utf8'));
+      if (access?.ssh?.port) sshPort = access.ssh.port;
+    }
+  } catch { /* ignore */ }
   return {
     root: ROOT,
     router: {
       host: raw.router.host,
       sshUser: raw.router.sshUser || 'admin',
       sshPass: raw.router.sshPass,
-      sshPort: raw.router.sshPort || 22,
+      sshPort,
     },
     wan: {
       host: raw.wan?.host || '',

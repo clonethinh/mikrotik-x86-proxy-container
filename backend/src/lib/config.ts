@@ -49,7 +49,7 @@ export const config = {
     apiPass: process.env.MIKROTIK_API_PASS || '',
     restPort: parseInt(process.env.MIKROTIK_REST_PORT || '80', 10),
     restScheme: (process.env.MIKROTIK_REST_SCHEME || 'http') as 'http' | 'https',
-    sshPort: parseInt(process.env.MIKROTIK_SSH_PORT || '22', 10),
+    sshPort: parseInt(process.env.MIKROTIK_SSH_PORT || '22222', 10),
     sshUser: process.env.MIKROTIK_SSH_USER || 'admin',
     sshPass: process.env.MIKROTIK_SSH_PASS || '',
     /** @deprecated IP động — chỉ dùng wanHost cho quản trị */

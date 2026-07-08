@@ -18,61 +18,17 @@ import { runLogTailOnce } from '../services/logs/LogTailer';
 import { runDomainAggregateOnce } from '../services/logs/TopDomainAggregator';
 import { syncClocks, getClockStatus } from '../services/system/ClockSyncService';
 import { getRouterMonitor } from '../services/metrics/RouterMonitorService';
-import { normalizeRouterResource } from '../lib/mikrotikResourceUtils';
-import { isContainerRunning } from '../lib/containerUtils';
+import { buildDashboardSnapshot } from '../services/metrics/DashboardRealtimeService';
 
 export default async function systemRoutes(app: FastifyInstance) {
   // Dashboard stats
   app.get('/api/dashboard', { preHandler: [app.authenticate] }, async () => {
-    const mik = getMikrotikService();
-    const [total, running, errors, wan, containers, resource] = await Promise.all([
-      prisma.proxyUser.count(),
-      prisma.proxyUser.count({ where: { status: 'running', enabled: true } }),
-      prisma.proxyUser.count({ where: { status: 'error' } }),
-      mik.getPppoeInterfaces().catch(() => []),
-      mik.getContainers().catch(() => []),
-      mik.getSystemResource().catch(() => ({})),
-    ]);
-    const proxyContainers = containers.filter(c => c.name.startsWith('proxy3p-'));
-    const healthyContainers = proxyContainers.filter(c => isContainerRunning(c.status));
-    const webui = containers.find(c => c.name === 'webuiproxymikrotik');
-    const normalized = normalizeRouterResource(resource as Record<string, unknown>);
-    const routerMonitor = await getRouterMonitor(4).catch(() => null);
-    return {
-      totalProxies: total,
-      runningProxies: running,
-      stoppedProxies: await prisma.proxyUser.count({ where: { status: 'stopped' } }),
-      errorProxies: errors,
-      totalWan: wan.length,
-      wanUp: wan.filter(w => w.running).length,
-      wanDown: wan.filter(w => !w.running).length,
-      containerProxies: proxyContainers.length,
-      containerHealthy: healthyContainers.length,
-      webuiRunning: !!webui && isContainerRunning(webui.status),
-      realtimeClients: realtimeHub.size(),
-      mikrotik: {
-        host: config.mikrotik.host,
-        wanHost: config.mikrotik.wanHost || null,
-        managementUrl: managementUrl() || null,
-        version: normalized.version,
-        cpuLoad: normalized.cpuLoadPct != null ? `${normalized.cpuLoadPct}%` : null,
-        freeMemory: normalized.freeMemoryBytes != null
-          ? `${Math.round(normalized.freeMemoryBytes / (1024 ** 3) * 10) / 10}GiB`
-          : null,
-        cpu: normalized.cpu,
-        cpuCount: normalized.cpuCount,
-        uptime: normalized.uptimeLabel,
-        boardName: normalized.boardName,
-        architecture: normalized.architecture,
-      },
-      routerMonitor,
-      timestamp: Date.now(),
-    };
+    return buildDashboardSnapshot();
   });
 
   app.get('/api/dashboard/router-monitor', { preHandler: [app.authenticate] }, async (req) => {
     const hours = Math.min(24, Math.max(1, parseInt(String((req.query as { hours?: string }).hours || '4'), 10) || 4));
-    return getRouterMonitor(hours);
+    return getRouterMonitor(hours, { fresh: true });
   });
 
   // WAN status list — merged với container thực tế trên router
@@ -231,6 +187,37 @@ export default async function systemRoutes(app: FastifyInstance) {
     },
   );
 
+  // Redeploy WebUI container (upload tar qua HTTP, SSH nội bộ container→router)
+  app.post('/api/system/redeploy-webui', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const u = req.user as { role?: string };
+    if (u.role !== 'admin') return reply.code(403).send({ error: 'admin only' });
+    const ctype = String(req.headers['content-type'] || '');
+    let tar: Buffer;
+    if (ctype.includes('application/json')) {
+      const body = req.body as { tarUrl?: string };
+      if (!body?.tarUrl) return reply.code(400).send({ error: 'tarUrl required' });
+      const { downloadTarFromUrl, redeployWebuiFromTarBuffer } = await import('../services/system/RedeployWebuiService');
+      tar = await downloadTarFromUrl(body.tarUrl);
+      const result = await redeployWebuiFromTarBuffer(tar);
+      return { ok: true, ...result };
+    }
+    if (Buffer.isBuffer(req.body) && req.body.length > 0) {
+      tar = req.body;
+    } else {
+      const chunks: Buffer[] = [];
+      for await (const chunk of req.raw) chunks.push(Buffer.from(chunk));
+      tar = Buffer.concat(chunks);
+    }
+    try {
+      const { redeployWebuiFromTarBuffer } = await import('../services/system/RedeployWebuiService');
+      const result = await redeployWebuiFromTarBuffer(tar);
+      return { ok: true, ...result };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(500).send({ error: msg.slice(0, 300) });
+    }
+  });
+
   // Test Mikrotik connection (REST + SSH)
   app.post('/api/mikrotik/test', { preHandler: [app.authenticate] }, async (req, reply) => {
     const mik = getMikrotikService();
@@ -350,7 +337,7 @@ export default async function systemRoutes(app: FastifyInstance) {
     // TCP tests
     for (const target of [
       { name: 'mikrotik-rest', host: '172.17.0.1', port: 80 },
-      { name: 'mikrotik-ssh', host: '172.17.0.1', port: 22 },
+      { name: 'mikrotik-ssh', host: '172.17.0.1', port: 22222 },
       { name: 'mikrotik-wan', host: '113.22.235.54', port: 80 },
       { name: 'proxy3p-2-direct', host: '172.18.2.2', port: 20002 },
       { name: 'proxy3p-2-via-wan', host: '113.22.235.54', port: 30057 },

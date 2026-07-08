@@ -20,7 +20,7 @@ function exec(conn, cmd) {
 
 (async () => {
   const c = new Client();
-  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22, username: USER, password: PASS }); });
+  await new Promise((r, j) => { c.on('ready', r); c.on('error', j); c.connect({ host: HOST, port: 22222, username: USER, password: PASS }); });
 
   console.log('=== IP Cloud / DDNS on router ===');
   const cloud = await exec(c, '/ip/cloud/print');

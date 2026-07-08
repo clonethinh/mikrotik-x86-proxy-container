@@ -16,7 +16,7 @@
 :local rawId [/ip/firewall/raw/find where comment="RAW: allow mgmt on pppoe-wan before bogon"]
 :if ([:len $rawId] > 0) do={
     /ip/firewall/raw/set $rawId chain=prerouting action=accept in-interface=pppoe-wan \
-        protocol=tcp dst-port=$mgmtPorts
+        protocol=tcp dst-port=$mgmtPorts disabled=no
     :set changes ($changes + 1)
     :put ("mgmt: updated RAW allow " . $mgmtPorts)
 } else={

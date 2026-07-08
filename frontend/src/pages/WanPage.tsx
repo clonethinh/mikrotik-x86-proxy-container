@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import AppDrawer from '../components/ui/AppDrawer';
 import ProxyToolbar from '../components/ui/ProxyToolbar';
-import ProxyPageShell, { ProxyCode } from '../components/proxy/ProxyPageShell';
+import ProxyPageShell from '../components/proxy/ProxyPageShell';
 import ProxyStatsRow from '../components/proxy/ProxyStatsRow';
 import { HTTP_PORT_BASE, SOCKS_PORT_BASE } from '../lib/proxyUtils';
 import {
@@ -362,13 +362,6 @@ export default function WanPage() {
 
   return (
     <ProxyPageShell
-      title={<><GlobalOutlined style={{ marginRight: 8, color: '#1677FF' }} />WAN Control</>}
-      subtitle={(
-        <>
-          Bật/tắt PPPoE, quay IP, tạo <ProxyCode>pppoe-outX</ProxyCode> tiếp theo · cổng proxy{' '}
-          <ProxyCode>{HTTP_PORT_BASE}+N</ProxyCode> / <ProxyCode>{SOCKS_PORT_BASE}+N</ProxyCode>
-        </>
-      )}
       stats={(
         <ProxyStatsRow
           items={[

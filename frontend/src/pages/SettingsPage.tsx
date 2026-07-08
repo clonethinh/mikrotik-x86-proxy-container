@@ -5,7 +5,7 @@ import SettingsSectionCard from '../components/ui/SettingsSectionCard';
 import ProxyPageShell from '../components/proxy/ProxyPageShell';
 import {
   ApiOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleOutlined, SyncOutlined,
-  PlayCircleOutlined, ReloadOutlined, SettingOutlined, UserOutlined, LockOutlined,
+  PlayCircleOutlined, ReloadOutlined, UserOutlined, LockOutlined,
   ThunderboltOutlined, CodeOutlined, InfoCircleOutlined,
 } from '@ant-design/icons';
 import { api, AutoProxySettings, ClockSyncResult, MikrotikTestResult, RouterScriptStatus } from '../services/api';
@@ -129,11 +129,7 @@ export default function SettingsPage() {
   };
 
   return (
-    <ProxyPageShell
-      className="settings-page"
-      title={<><SettingOutlined style={{ marginRight: 8, color: '#1677FF' }} />Cài đặt hệ thống</>}
-      subtitle="Tài khoản, auto-proxy pool, script router và thông tin deploy"
-    >
+    <ProxyPageShell className="settings-page">
       <Row gutter={[16, 0]}>
         <Col xs={24} lg={12}>
           <SettingsSectionCard

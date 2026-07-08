@@ -13,4 +13,4 @@ c.on('ready', async () => {
   console.log('NAT left:', (await e('/ip/firewall/nat/print where comment~"ctn-"')).trim() || '(none)');
   c.end();
 });
-c.connect({ host: '113.22.235.54', port: 22, username: 'admin', password: 'toanthinh' });
+c.connect({ host: '113.22.235.54', port: 22222, username: 'admin', password: 'toanthinh' });

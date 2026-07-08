@@ -226,7 +226,29 @@ export interface RouterMonitorHistoryPoint {
   containerRunning: number;
 }
 
+export interface WanTrafficHistoryPoint {
+  ts: string;
+  rxBps: number;
+  txBps: number;
+}
+
+export interface WanTrafficSnapshot {
+  rxBytes: string;
+  txBytes: string;
+  rxLabel: string;
+  txLabel: string;
+  rxBps: number;
+  txBps: number;
+  wanUp: number;
+  wanTotal: number;
+  sampleAgeMs: number;
+  live: boolean;
+  history: WanTrafficHistoryPoint[];
+}
+
 export interface RouterMonitorSnapshot {
+  live?: boolean;
+  sampleAgeMs?: number;
   cpuLoadPct: number | null;
   memoryUsedPct: number | null;
   hddUsedPct: number | null;
@@ -260,6 +282,8 @@ export interface DashboardData {
   wanUp: number;
   wanDown: number;
   realtimeClients: number;
+  live?: boolean;
+  source?: 'mikrotik';
   mikrotik: {
     host: string;
     wanHost?: string | null;
@@ -274,9 +298,12 @@ export interface DashboardData {
     architecture?: string | null;
   };
   routerMonitor?: RouterMonitorSnapshot | null;
+  wanTraffic?: WanTrafficSnapshot | null;
   containerProxies?: number;
   containerHealthy?: number;
   webuiRunning?: boolean;
+  dhcpLeases?: DhcpLease[];
+  deviceRoutes?: DeviceRoute[];
   timestamp: number;
 }
 
@@ -304,6 +331,15 @@ export interface DhcpLease {
   hostName: string;
   status: string;
   server: string;
+  /** Download bytes (to device) — cumulative MikroTik mangle counter */
+  rxBytes?: string;
+  /** Upload bytes (from device) */
+  txBytes?: string;
+  rxLabel?: string;
+  txLabel?: string;
+  rxBps?: number;
+  txBps?: number;
+  trafficLive?: boolean;
 }
 
 export interface AuditItem {
