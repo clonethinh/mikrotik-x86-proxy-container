@@ -1,0 +1,39 @@
+{
+  "router": {
+    "host": "CHANGE_HOST",
+    "sshUser": "admin",
+    "sshPass": "CHANGE_ME",
+    "sshPort": 22
+  },
+  "wan": {
+    "host": "CHANGE_HOST",
+    "managementPppoe": "pppoe-wan"
+  },
+  "webui": {
+    "adminUser": "admin",
+    "adminPass": "admin123",
+    "jwtSecret": "webuiproxymikrotik-change-in-prod-32chars-x",
+    "port": 8088
+  },
+  "proxy": {
+    "deployMode": "hub"
+  },
+  "hub": {
+    "shardSize": 50,
+    "shardCount": 2,
+    "maxPppoeOut": 100
+  },
+  "threeProxy": {
+    "tarball": "disk1/3proxy.tar",
+    "hubTarball": "disk1/3proxy-hub.tar",
+    "hubImage": "webuiproxymikrotik/3proxy-hub:2"
+  },
+  "mode": "fresh",
+  "options": {
+    "skipBuild": false,
+    "skipCleanup": true,
+    "upload3proxyTar": false,
+    "upload3proxyHubTar": true,
+    "purgeDbOnFresh": true
+  }
+}

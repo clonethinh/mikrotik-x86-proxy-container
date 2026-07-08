@@ -1,0 +1,60 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+
+# Built/copied frontend assets (backend serves built UI)
+backend/public/
+
+# Environment & secrets
+.env*
+!.env.example
+user-ssh-mikrotik.txt
+setup.config.json
+setup-report.json
+
+# Database files & persistent data
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+data/
+backend/data/
+
+# Test data, audit reports, runtime dumps (NEVER commit these)
+backend/all_proxies.json
+backend/*test*.json
+backend/*audit*.json
+backend/sync-result.json
+backend/router_users.json
+backend/proxy-router*.db*
+
+# Logs, temp dirs, debug captures
+terminals/
+tmp/
+logs/
+*.log
+npm-debug.log*
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Docker build artifacts & overrides
+*.tar
+docker-compose.override.yml
+
+# MikroTik debug / scratch
+scratch/
+*.rsc.bak
+
+# Local tooling / agent dirs
+.grok/

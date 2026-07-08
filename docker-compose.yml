@@ -1,0 +1,24 @@
+services:
+  webuiproxymikrotik:
+    build: .
+    image: webuiproxymikrotik:latest
+    container_name: webuiproxymikrotik
+    restart: unless-stopped
+    ports:
+      - "8088:8088"
+    volumes:
+      - ./data:/data
+    environment:
+      - NODE_ENV=production
+      - PORT=8088
+      - DEPLOY_TARGET=external
+      - MIKROTIK_HOST=${MIKROTIK_HOST}
+      - MIKROTIK_API_USER=${MIKROTIK_API_USER:-admin}
+      - MIKROTIK_API_PASS=${MIKROTIK_API_PASS}
+      - MIKROTIK_SSH_USER=${MIKROTIK_SSH_USER:-admin}
+      - MIKROTIK_SSH_PASS=${MIKROTIK_SSH_PASS}
+      - MIKROTIK_WAN_IP=${MIKROTIK_WAN_IP}
+      - JWT_SECRET=${JWT_SECRET:-change-me-32-chars-minimum-secret-key}
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-changeme123}
+      - DATABASE_URL=file:/data/proxy.db

@@ -1,0 +1,222 @@
+// Prisma schema for webuiproxymikrotik
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model ProxyUser {
+  id          Int       @id @default(autoincrement())
+  pppoeIdx    Int       @unique // 1..16
+  pppoeName   String    // pppoe-out1 (slot id)
+  egressPppoeName String? // pppoe-out đang gán egress (hub pool động)
+  vethName    String    // veth-3p-1 | veth-3p-hub
+  vethIp      String    // 172.18.1.2/30
+  gatewayIp   String    // 172.18.1.1
+  proxyType   String    // "http" | "socks5" | "both"
+  httpPort    Int       @unique
+  socksPort   Int?      @unique
+  extHttpPort Int       @unique
+  extSocksPort Int?     @unique
+  containerName String  // proxy3p-1
+  username    String    @unique
+  password    String
+  publicIp    String?   // current public IP from PPPoE
+  note        String?   // free-form note from admin (added 2026-07)
+  enabled     Boolean   @default(true)
+  status      String    @default("pending") // pending|running|stopped|error
+  statusMessage String? // last error/health message (added 2026-07)
+  lastCheckAt DateTime?
+  lastLatencyMs Int?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  ipHistory     IpHistory[]
+  healthChecks  HealthCheck[]
+  auditLogs     AuditLog[]
+  trafficSamples ProxyTrafficSample[]
+  trafficRollups ProxyTrafficRollup[]
+  requestLogs   ProxyRequestLog[]
+  domainStats   ProxyDomainStats[]
+  limit         ProxyLimit?
+}
+
+model ProxyLimit {
+  id                Int       @id @default(autoincrement())
+  proxyId           Int       @unique
+  quotaDailyMb      Int?
+  quotaWeeklyMb     Int?
+  quotaMonthlyMb    Int?
+  speedDownKbps     Int?
+  speedUpKbps       Int?
+  maxConnections    Int?
+  allowedHours      String?   // JSON: {weekdays, periods[]}
+  expiresAt         DateTime?
+  enabled           Boolean   @default(true)
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+  proxy             ProxyUser @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+}
+
+model ProxyTrafficSample {
+  id        Int      @id @default(autoincrement())
+  proxyId   Int
+  ts        DateTime @default(now())
+  rxBytes   BigInt   @default(0)
+  txBytes   BigInt   @default(0)
+  rxBps     Int      @default(0)
+  txBps     Int      @default(0)
+  clients   Int      @default(0)
+  proxy     ProxyUser @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+
+  @@index([proxyId, ts])
+}
+
+model ProxyTrafficRollup {
+  id        Int      @id @default(autoincrement())
+  proxyId   Int
+  period    String   // hour|day|week|month
+  bucket    String   // ISO bucket start
+  rxBytes   BigInt   @default(0)
+  txBytes   BigInt   @default(0)
+  requests  Int      @default(0)
+  errors    Int      @default(0)
+  proxy     ProxyUser @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+
+  @@unique([proxyId, period, bucket])
+  @@index([proxyId, period, bucket])
+}
+
+model ProxyRequestLog {
+  id         Int      @id @default(autoincrement())
+  proxyId    Int
+  ts         DateTime @default(now())
+  clientIp   String
+  destHost   String?
+  destPort   Int?
+  rxBytes    BigInt   @default(0)
+  txBytes    BigInt   @default(0)
+  errorCode  Int      @default(0)
+  durationMs Int?
+  service    String?
+  proxy      ProxyUser @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+
+  @@index([proxyId, ts])
+  @@index([proxyId, destHost])
+}
+
+model ProxyDomainStats {
+  id        Int      @id @default(autoincrement())
+  proxyId   Int
+  bucket    String   // daily YYYY-MM-DD
+  domain    String
+  rxBytes   BigInt   @default(0)
+  txBytes   BigInt   @default(0)
+  hits      Int      @default(0)
+  proxy     ProxyUser @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+
+  @@unique([proxyId, bucket, domain])
+  @@index([proxyId, bucket])
+}
+
+model IpHistory {
+  id        Int      @id @default(autoincrement())
+  proxyId   Int
+  oldIp     String?
+  newIp     String
+  source    String   // "pppoe-reconnect" | "manual" | "sync"
+  createdAt DateTime @default(now())
+  proxy     ProxyUser @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+}
+
+model HealthCheck {
+  id        Int      @id @default(autoincrement())
+  proxyId   Int
+  ok        Boolean
+  latencyMs Int?
+  exitIp    String?
+  error     String?
+  checkedAt DateTime @default(now())
+  proxy     ProxyUser @relation(fields: [proxyId], references: [id], onDelete: Cascade)
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  userId    Int?
+  username  String
+  action    String   // "create" | "update" | "delete" | "start" | "stop" | "reload-ip" | "test" | "export" | "login" | "logout"
+  resource  String?  // "proxy" | "user" | "system"
+  resourceId Int?
+  details   String?  // JSON string
+  ip        String?
+  createdAt DateTime @default(now())
+  proxyId   Int?
+  proxy     ProxyUser? @relation(fields: [proxyId], references: [id], onDelete: SetNull)
+}
+
+model AdminUser {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  passwordHash String
+  role      String   @default("admin") // admin | viewer
+  enabled   Boolean  @default(true)
+  lastLogin DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
+
+model WanStatus {
+  id        Int      @id @default(autoincrement())
+  pppoeName String   @unique
+  pppoeIdx  Int
+  isUp      Boolean
+  publicIp  String?
+  uptime    Int?
+  rxBytes   BigInt?
+  txBytes   BigInt?
+  updatedAt DateTime @updatedAt
+}
+
+// Auto-discovery workflow for infinite pppoe-out pool rotation
+model WanDiscovery {
+  id             Int       @id @default(autoincrement())
+  pppoeName      String    @unique
+  pppoeIdx       Int
+  workflowState  String    @default("discovered") // discovered|countdown|provisioning|active|queued|stale|gone|error|skipped
+  publicIp       String?
+  discoveredAt   DateTime  @default(now())
+  lastSeenAt     DateTime  @default(now())
+  goneAt         DateTime?
+  staleAt        DateTime?
+  countdownEnds  DateTime?
+  proxyId        Int?
+  error          String?
+  updatedAt      DateTime  @updatedAt
+}
+
+model DeviceRoute {
+  id          Int      @id @default(autoincrement())
+  name        String
+  matchType   String   // ip | mac | dhcp
+  ipAddress   String?
+  macAddress  String?
+  dhcpHostName String?
+  pppoeIdx    Int
+  pppoeName   String
+  enabled     Boolean  @default(true)
+  applied     Boolean  @default(false)
+  statusMessage String?
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
