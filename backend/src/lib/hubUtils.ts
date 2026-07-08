@@ -160,7 +160,7 @@ export const HUB_ROUTER_ADDRESS_LIST = 'hub-router';
 export const HUB_SLOT_ADDRESS_LIST = 'hub-slot-ips';
 /** LAN/device policy routing: không mark traffic tới router/container/mgmt */
 export const DEV_ROUTE_SKIP_ADDRESS_LIST = 'dev-route-skip';
-export const DEV_MGMT_TCP_PORTS = '8088,22,80,443,8291';
+export const DEV_MGMT_TCP_PORTS = '8088,22222,80,443,8291';
 export const DEV_MGMT_BYPASS_COMMENT = 'dev-mgmt-bypass';
 /** Gateway hairpin: LAN client → 192.168.x.1:extPort */
 export const HUB_HAIRPIN_GW_MARK = 'hub-hairpin-gw';

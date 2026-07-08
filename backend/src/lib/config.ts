@@ -145,6 +145,14 @@ export const config = {
     deployMode: (process.env.PROXY_DEPLOY_MODE || 'hub') as 'hub' | 'legacy',
   },
 
+  sshBlacklist: {
+    /** Tự blacklist IP brute-force SSH — tắt bằng SSH_BLACKLIST_ENABLED=false */
+    enabled: process.env.SSH_BLACKLIST_ENABLED !== 'false',
+    maxFailures: parseInt(process.env.SSH_BLACKLIST_MAX_FAILURES || '5', 10),
+    strikeWindow: process.env.SSH_BLACKLIST_STRIKE_WINDOW || '15m',
+    blacklistTimeout: process.env.SSH_BLACKLIST_TIMEOUT || '1d',
+  },
+
   hub: {
     shardSize: parseInt(process.env.HUB_SHARD_SIZE || '50', 10),
     shardCount: parseInt(process.env.HUB_SHARD_COUNT || '6', 10),
@@ -163,6 +171,12 @@ export const config = {
     reloadDebounceMs: parseInt(process.env.HUB_RELOAD_DEBOUNCE_MS || '2500', 10),
     /** Repair toàn bộ slot sau mỗi create — tắt mặc định (tốn CPU O(n)) */
     repairAllOnApply: process.env.HUB_REPAIR_ALL_ON_APPLY === 'true',
+    /** Tự apply rate-limit firewall sau tạo/sửa proxy — tắt bằng HUB_RATE_LIMIT_ON_APPLY=false */
+    rateLimitOnApply: process.env.HUB_RATE_LIMIT_ON_APPLY !== 'false',
+    rateLimitDebounceMs: parseInt(
+      process.env.HUB_RATE_LIMIT_DEBOUNCE_MS || process.env.HUB_RELOAD_DEBOUNCE_MS || '2500',
+      10,
+    ),
   },
 
   autoProxy: {

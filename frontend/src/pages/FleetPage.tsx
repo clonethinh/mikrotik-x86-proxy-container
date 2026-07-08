@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Table, Button, Space, Tag, Switch, Input, Modal, Form, Select,
-  Card, Typography, App, Segmented, Tooltip, Drawer, Dropdown, Flex, Divider,
+  Card, Typography, App, Segmented, Tooltip, Dropdown, Flex,
 } from 'antd';
+import AppDrawer from '../components/ui/AppDrawer';
+import ProxyToolbar from '../components/ui/ProxyToolbar';
+import { DrawerSection, DrawerKv, DrawerKvGrid, DrawerStatusBand } from '../components/ui/DrawerSection';
 import {
   PlusOutlined, ReloadOutlined, ThunderboltOutlined, CopyOutlined,
   GlobalOutlined, ApiOutlined, RocketOutlined, PauseCircleOutlined,
@@ -387,6 +390,7 @@ export default function FleetPage() {
         </>
       }
       policy={{
+        id: 'fleet-pool-rotation',
         message: 'Pool rotation & auto-provision',
         description: (
           <>
@@ -399,17 +403,17 @@ export default function FleetPage() {
       stats={
         <ProxyStatsRow
           items={[
-            { key: 'pppoe', title: 'PPPoE trong pool', value: stats.total, prefix: <GlobalOutlined style={{ color: '#1677FF' }} /> },
-            { key: 'up', title: 'WAN đang UP', value: stats.up, valueStyle: { color: '#52C41A' } },
-            { key: 'ctn', title: 'Container chạy', value: stats.withContainer, prefix: <ApiOutlined style={{ color: '#722ED1' }} /> },
-            { key: 'db', title: 'Ghi trong DB', value: stats.withDb },
+            { key: 'pppoe', title: 'PPPoE trong pool', value: stats.total, icon: <GlobalOutlined />, accent: 'primary' },
+            { key: 'up', title: 'WAN đang UP', value: stats.up, icon: <CheckCircleOutlined />, accent: 'success' },
+            { key: 'ctn', title: 'Container chạy', value: stats.withContainer, icon: <ApiOutlined />, accent: 'purple' },
+            { key: 'db', title: 'Ghi trong DB', value: stats.withDb, icon: <CloudServerOutlined />, accent: 'primary' },
           ]}
         />
       }
-      toolbar={
-        <Card className="proxy-toolbar-card" style={{ marginBottom: 16 }}>
-          <Flex gap={12} wrap="wrap" align="center" justify="space-between">
-            <Flex gap={12} wrap="wrap" align="center" style={{ flex: 1 }}>
+      toolbar={(
+        <ProxyToolbar
+          filters={(
+            <>
               <Input.Search
                 placeholder="Tìm PPPoE, IP động, container…"
                 allowClear
@@ -427,21 +431,26 @@ export default function FleetPage() {
                   { label: 'Chưa proxy', value: 'noproxy' },
                 ]}
               />
-            </Flex>
-            <Space wrap>
+            </>
+          )}
+          actions={(
+            <>
               <Button icon={<ReloadOutlined />} onClick={load}>Làm mới</Button>
               <Button type="primary" icon={<PlusOutlined />} onClick={() => setCreateOpen(true)}>
                 Tạo proxy
               </Button>
-              {selected.length > 0 && (
-                <Button type="primary" icon={<RocketOutlined />} loading={bulkBusy} onClick={bulkEnable}>
-                  Bật {selected.length} WAN
-                </Button>
-              )}
-            </Space>
-          </Flex>
-        </Card>
-      }
+            </>
+          )}
+          bulk={selected.length > 0 ? (
+            <>
+              <Tag color="blue" bordered={false}>Đã chọn {selected.length}</Tag>
+              <Button type="primary" icon={<RocketOutlined />} loading={bulkBusy} onClick={bulkEnable}>
+                Bật {selected.length} WAN
+              </Button>
+            </>
+          ) : undefined}
+        />
+      )}
     >
       <Card className="proxy-table-card" styles={{ body: { padding: 0 } }}>
         <Table
@@ -489,48 +498,65 @@ export default function FleetPage() {
         </Form>
       </Modal>
 
-      <Drawer
-        title={detailRow ? `${detailRow.name} · ${detailRow.publicIp || 'chưa có IP'}` : ''}
+      <AppDrawer
         open={!!detailRow}
         onClose={() => setDetailRow(null)}
-        width={520}
+        width="md"
+        icon={<GlobalOutlined />}
+        title={detailRow?.name ?? 'Chi tiết'}
+        subtitle={detailRow ? (detailRow.publicIp || 'Chưa có IP public') : undefined}
       >
         {detailRow && (
-          <Flex vertical gap={20}>
-            <div>
-              <Text type="secondary">Container</Text>
-              <div style={{ marginTop: 8 }}>
-                <ContainerStatusTag
-                  status={detailRow.containerStatus}
-                  containerName={detailRow.containerName}
-                  hasContainer={detailRow.hasContainer}
-                />
-              </div>
-            </div>
-            <Divider style={{ margin: 0 }} />
-            <div>
-              <Text type="secondary">HTTP endpoint</Text>
-              <div style={{ marginTop: 8 }}>
-                <ProxyEndpoint row={detailRow} kind="http" onCopy={copy} />
-              </div>
-            </div>
-            <div>
-              <Text type="secondary">SOCKS5 endpoint</Text>
-              <div style={{ marginTop: 8 }}>
-                <ProxyEndpoint row={detailRow} kind="socks5" onCopy={copy} />
-              </div>
-            </div>
-            <div>
-              <Text type="secondary">Veth</Text>
-              <div style={{ marginTop: 4 }}><Text code>{detailRow.vethName || '—'}</Text></div>
-            </div>
-            <div>
-              <Text type="secondary">Uptime</Text>
-              <div style={{ marginTop: 4 }}>{detailRow.uptime || '—'}</div>
-            </div>
-          </Flex>
+          <>
+            <DrawerStatusBand tone={detailRow.running ? 'success' : 'error'}>
+              <Tag color={detailRow.running ? 'success' : 'error'} bordered={false}>
+                {detailRow.running ? 'WAN UP' : 'WAN DOWN'}
+              </Tag>
+              <ContainerStatusTag
+                status={detailRow.containerStatus}
+                containerName={detailRow.containerName}
+                hasContainer={detailRow.hasContainer}
+              />
+              {workflowTag(detailRow)}
+              {detailRow.username && <Tag bordered={false}>{detailRow.username}</Tag>}
+            </DrawerStatusBand>
+
+            <DrawerSection title="Endpoints">
+              <Flex vertical gap={12}>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>HTTP</Text>
+                  <div style={{ marginTop: 6 }}>
+                    <ProxyEndpoint row={detailRow} kind="http" onCopy={copy} />
+                  </div>
+                </div>
+                <div>
+                  <Text type="secondary" style={{ fontSize: 12 }}>SOCKS5</Text>
+                  <div style={{ marginTop: 6 }}>
+                    <ProxyEndpoint row={detailRow} kind="socks5" onCopy={copy} />
+                  </div>
+                </div>
+              </Flex>
+            </DrawerSection>
+
+            <DrawerSection title="Thông tin kỹ thuật">
+              <DrawerKvGrid>
+                <DrawerKv label="Veth" icon={<ApiOutlined />}>
+                  <Text code>{detailRow.vethName || '—'}</Text>
+                </DrawerKv>
+                <DrawerKv label="Uptime">
+                  {detailRow.uptime || '—'}
+                </DrawerKv>
+                <DrawerKv label="Latency">
+                  {detailRow.lastLatencyMs ? `${detailRow.lastLatencyMs} ms` : '—'}
+                </DrawerKv>
+                <DrawerKv label="Container">
+                  {detailRow.containerName || '—'}
+                </DrawerKv>
+              </DrawerKvGrid>
+            </DrawerSection>
+          </>
         )}
-      </Drawer>
+      </AppDrawer>
     </ProxyPageShell>
   );
 }

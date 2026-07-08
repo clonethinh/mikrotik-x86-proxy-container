@@ -1,16 +1,22 @@
 import type { ReactNode } from 'react';
-import { Alert, Flex, Typography } from 'antd';
+import { Typography } from 'antd';
+import PageHeader from '../ui/PageHeader';
+import DismissibleAlert from '../ui/DismissibleAlert';
 
-const { Title, Paragraph, Text } = Typography;
+const { Text } = Typography;
 
 export interface ProxyPageShellProps {
   title: ReactNode;
   subtitle?: ReactNode;
   extra?: ReactNode;
-  policy?: { message: string; description?: ReactNode };
+  policy?: { id: string; message: string; description?: ReactNode };
   stats?: ReactNode;
   toolbar?: ReactNode;
   children: ReactNode;
+  className?: string;
+  /** Table page: fill remaining viewport height */
+  fillViewport?: boolean;
+  compactHeader?: boolean;
 }
 
 export default function ProxyPageShell({
@@ -21,39 +27,46 @@ export default function ProxyPageShell({
   stats,
   toolbar,
   children,
+  className,
+  fillViewport,
+  compactHeader,
 }: ProxyPageShellProps) {
+  const pageClass = [
+    'proxy-page',
+    fillViewport ? 'proxy-page--fill' : '',
+    className ?? '',
+  ].filter(Boolean).join(' ');
+
+  const body = (
+    <>
+      {stats}
+      {toolbar}
+      {children}
+    </>
+  );
+
   return (
-    <div className="proxy-page">
-      <Flex className="proxy-page__hero" justify="space-between" align="flex-start" gap={16} wrap="wrap">
-        <div>
-          <Title level={3} className="proxy-page__hero-title">
-            {title}
-          </Title>
-          {subtitle && (
-            <Paragraph type="secondary" style={{ margin: '4px 0 0', maxWidth: 720 }}>
-              {subtitle}
-            </Paragraph>
-          )}
-        </div>
-        {extra}
-      </Flex>
+    <div className={pageClass}>
+      <PageHeader
+        title={title}
+        subtitle={subtitle}
+        extra={extra}
+        compact={compactHeader}
+      />
 
       {policy && (
-        <Alert
+        <DismissibleAlert
+          bannerId={policy.id}
           className="proxy-policy-banner"
           type="info"
           showIcon
-          style={{ marginBottom: 16 }}
+          style={{ marginBottom: fillViewport ? 10 : 16 }}
           message={policy.message}
           description={policy.description}
         />
       )}
 
-      {stats}
-
-      {toolbar}
-
-      {children}
+      {fillViewport ? <div className="proxy-page__fill-body">{body}</div> : body}
     </div>
   );
 }

@@ -1,25 +1,28 @@
-import { Layout, Menu, Button, theme, Avatar, Dropdown, Badge, Typography, Flex } from 'antd';
-import { Outlet, useNavigate, useLocation } from 'react-router-dom';
+import { Layout, Menu, Button, theme, Avatar, Dropdown, Typography, Flex, Breadcrumb, Badge, Tooltip, Divider } from 'antd';
+import DismissibleAlert from './ui/DismissibleAlert';
+import { Outlet, useNavigate, useLocation, Link } from 'react-router-dom';
 import {
   DashboardOutlined, GlobalOutlined, AuditOutlined,
   SettingOutlined, LogoutOutlined, UserOutlined,
   CloudServerOutlined, LaptopOutlined, ApiOutlined,
+  HomeOutlined,
 } from '@ant-design/icons';
 import { useAuth } from '../services/auth';
 import { useWebSocket } from '../hooks/useWebSocket';
 import { useWSStore } from '../services/ws';
+import { isUiPreview } from '../lib/env';
 
 const { Header, Sider, Content } = Layout;
 const { Text } = Typography;
 
-const routeTitles: Record<string, string> = {
-  '/dashboard': 'Dashboard',
-  '/fleet': 'Proxy Fleet',
-  '/proxies': 'Proxy chi tiết',
-  '/wan': 'WAN Control',
-  '/devices': 'Định tuyến thiết bị',
-  '/audit': 'Audit Log',
-  '/settings': 'Settings',
+const routeMeta: Record<string, { title: string; parent?: { path: string; title: string } }> = {
+  '/dashboard': { title: 'Dashboard' },
+  '/fleet': { title: 'Proxy Fleet' },
+  '/proxies': { title: 'Proxy chi tiết', parent: { path: '/fleet', title: 'Fleet' } },
+  '/wan': { title: 'WAN Control' },
+  '/devices': { title: 'Định tuyến thiết bị' },
+  '/audit': { title: 'Audit Log' },
+  '/settings': { title: 'Settings' },
 };
 
 export default function AppLayout() {
@@ -40,108 +43,104 @@ export default function AppLayout() {
     { key: '/settings', icon: <SettingOutlined />, label: 'Settings' },
   ];
 
-  const title = routeTitles[location.pathname] || '';
-  const isProxyRoute = location.pathname === '/fleet' || location.pathname === '/proxies';
+  const meta = routeMeta[location.pathname];
+
+  const breadcrumbItems = [
+    {
+      title: (
+        <Link to="/dashboard" className="app-breadcrumb-link">
+          <HomeOutlined />
+          <span>Console</span>
+        </Link>
+      ),
+    },
+    ...(meta?.parent
+      ? [{ title: <Link to={meta.parent.path}>{meta.parent.title}</Link> }]
+      : []),
+    ...(meta ? [{ title: meta.title }] : []),
+  ];
 
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Sider width={232} theme="dark" breakpoint="lg" collapsedWidth={64}>
-        <Flex
-          align="center"
-          gap={12}
-          style={{
-            height: 56,
-            padding: '0 20px',
-            borderBottom: '1px solid rgba(255,255,255,0.08)',
-          }}
-        >
-          <div
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 8,
-              background: 'linear-gradient(135deg, #1677FF 0%, #0958D9 100%)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            <ApiOutlined style={{ color: '#fff', fontSize: 16 }} />
+    <Layout className="app-layout-root">
+      <Sider width={248} theme="dark" breakpoint="lg" collapsedWidth={72} className="app-sider">
+        <Flex align="center" gap={12} className="app-sider-brand">
+          <div className="app-sider-logo">
+            <ApiOutlined style={{ color: '#fff', fontSize: 18 }} />
           </div>
-          <div style={{ minWidth: 0 }}>
-            <div style={{ color: '#fff', fontWeight: 600, fontSize: 14, lineHeight: 1.25 }}>
+          <div style={{ minWidth: 0, overflow: 'hidden' }}>
+            <div style={{ color: '#fff', fontWeight: 600, fontSize: 15, lineHeight: 1.25, whiteSpace: 'nowrap' }}>
               MikroTik Proxy
             </div>
-            <Text style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>RouterOS · IP động</Text>
+            <Text style={{ color: 'rgba(255,255,255,0.5)', fontSize: 11 }}>RouterOS · PPPoE fleet</Text>
           </div>
         </Flex>
         <Menu
           theme="dark"
           mode="inline"
+          className="app-sider-menu"
           selectedKeys={[location.pathname]}
           items={menuItems}
           onClick={({ key }) => navigate(key)}
-          style={{ border: 'none', padding: '8px 0' }}
+          style={{ border: 'none', padding: '16px 8px' }}
         />
       </Sider>
       <Layout>
-        <Header
-          style={{
-            background: token.colorBgContainer,
-            padding: '0 24px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            borderBottom: `1px solid ${token.colorBorderSecondary}`,
-            height: 56,
-            position: 'sticky',
-            top: 0,
-            zIndex: 10,
-          }}
-        >
-          <Flex align="center" gap={12}>
-            <span style={{ fontSize: 16, fontWeight: 600, color: token.colorText }}>{title}</span>
-            {isProxyRoute && (
-              <Badge
-                count="Live pool"
-                style={{ backgroundColor: '#E6F4FF', color: '#0958D9', fontWeight: 500 }}
-              />
-            )}
-          </Flex>
-          <Flex align="center" gap={16}>
-            <Badge
-              status={wsConnected ? 'processing' : 'error'}
-              text={
-                <Text type="secondary" style={{ fontSize: 13 }}>
-                  {wsConnected ? 'Realtime' : 'Offline'}
-                </Text>
-              }
-            />
-            <Dropdown
-              menu={{
-                items: [{
-                  key: 'logout',
-                  icon: <LogoutOutlined />,
-                  label: 'Đăng xuất',
-                  onClick: async () => {
-                    await logout();
-                    navigate('/login');
-                  },
-                }],
-              }}
-            >
-              <Button type="text" style={{ height: 40, paddingInline: 8 }}>
-                <Flex align="center" gap={8}>
-                  <Avatar size="small" icon={<UserOutlined />} style={{ background: '#1677FF' }} />
-                  <Text>{user?.username}</Text>
+        <Header className="app-main-header">
+          <Flex align="center" justify="space-between" style={{ width: '100%', height: '100%' }}>
+            <Flex vertical justify="center" gap={4} className="app-header-left">
+              <Text className="app-header-title">{meta?.title || 'Console'}</Text>
+              <Breadcrumb className="app-header-breadcrumb" items={breadcrumbItems} />
+            </Flex>
+
+            <Flex align="center" gap={8} className="app-header-right">
+              <Tooltip title={wsConnected ? 'WebSocket đang kết nối' : 'WebSocket ngắt — dữ liệu có thể chậm'}>
+                <Flex align="center" gap={8} className="app-header-ws">
+                  <Badge status={wsConnected ? 'processing' : 'error'} />
+                  <Text type="secondary" className="app-header-ws-label">
+                    {wsConnected ? 'Trực tiếp' : 'Ngắt'}
+                  </Text>
                 </Flex>
-              </Button>
-            </Dropdown>
+              </Tooltip>
+
+              <Divider type="vertical" style={{ height: 24, margin: 0 }} />
+
+              <Dropdown
+                menu={{
+                  items: [{
+                    key: 'logout',
+                    icon: <LogoutOutlined />,
+                    label: 'Đăng xuất',
+                    onClick: async () => {
+                      await logout();
+                      navigate('/login');
+                    },
+                  }],
+                }}
+              >
+                <Button type="text" className="app-header-user-btn">
+                  <Flex align="center" gap={8}>
+                    <Avatar size="small" icon={<UserOutlined />} style={{ background: token.colorPrimary }} />
+                    <Text strong className="app-header-username">{user?.username}</Text>
+                  </Flex>
+                </Button>
+              </Dropdown>
+            </Flex>
           </Flex>
         </Header>
-        <Content style={{ padding: 24, background: token.colorBgLayout, minHeight: 'calc(100vh - 56px)' }}>
-          <Outlet />
+        <Content className="app-content-area" style={{ padding: 24, minHeight: 'calc(100vh - 56px)' }}>
+          <div className="app-content-inner">
+            {isUiPreview && (
+              <DismissibleAlert
+                bannerId="ui-preview-mode"
+                type="info"
+                showIcon
+                style={{ marginBottom: 16 }}
+                message="Chế độ xem trước (mock data)"
+                description="npm run dev:preview — không cần router/backend."
+              />
+            )}
+            <Outlet />
+          </div>
         </Content>
       </Layout>
     </Layout>

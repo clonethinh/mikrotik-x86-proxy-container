@@ -30,7 +30,7 @@ export interface ProxyEndpointRow {
   password?: string;
   extHttpPort?: number;
   extSocksPort?: number;
-  proxyType?: string;
+  proxyType?: string | null;
 }
 
 function resolveIdx(row: ProxyEndpointRow): number {

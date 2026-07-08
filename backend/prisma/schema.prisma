@@ -204,6 +204,21 @@ model WanDiscovery {
   updatedAt      DateTime  @updatedAt
 }
 
+model RouterResourceSample {
+  id                 Int      @id @default(autoincrement())
+  ts                 DateTime @default(now())
+  cpuLoadPct         Int?
+  memoryUsedPct      Int?
+  freeMemoryBytes    BigInt?
+  totalMemoryBytes   BigInt?
+  hddUsedPct         Int?
+  uptimeSec          Int?
+  containerTotal     Int      @default(0)
+  containerRunning   Int      @default(0)
+
+  @@index([ts])
+}
+
 model DeviceRoute {
   id          Int      @id @default(autoincrement())
   name        String

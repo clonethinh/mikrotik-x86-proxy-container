@@ -17,6 +17,9 @@ import { runRollupOnce } from '../services/metrics/RollupAggregator';
 import { runLogTailOnce } from '../services/logs/LogTailer';
 import { runDomainAggregateOnce } from '../services/logs/TopDomainAggregator';
 import { syncClocks, getClockStatus } from '../services/system/ClockSyncService';
+import { getRouterMonitor } from '../services/metrics/RouterMonitorService';
+import { normalizeRouterResource } from '../lib/mikrotikResourceUtils';
+import { isContainerRunning } from '../lib/containerUtils';
 
 export default async function systemRoutes(app: FastifyInstance) {
   // Dashboard stats
@@ -31,11 +34,10 @@ export default async function systemRoutes(app: FastifyInstance) {
       mik.getSystemResource().catch(() => ({})),
     ]);
     const proxyContainers = containers.filter(c => c.name.startsWith('proxy3p-'));
-    const healthyContainers = proxyContainers.filter(c =>
-      ['running', 'R', 'healthy', 'H', ''].includes((c.status || '').toLowerCase()) ||
-      (c.status || '').includes('good'),
-    );
+    const healthyContainers = proxyContainers.filter(c => isContainerRunning(c.status));
     const webui = containers.find(c => c.name === 'webuiproxymikrotik');
+    const normalized = normalizeRouterResource(resource as Record<string, unknown>);
+    const routerMonitor = await getRouterMonitor(4).catch(() => null);
     return {
       totalProxies: total,
       runningProxies: running,
@@ -46,18 +48,31 @@ export default async function systemRoutes(app: FastifyInstance) {
       wanDown: wan.filter(w => !w.running).length,
       containerProxies: proxyContainers.length,
       containerHealthy: healthyContainers.length,
-      webuiRunning: !!webui && ['running', 'R', 'healthy', 'H'].includes((webui.status || '').toLowerCase()),
+      webuiRunning: !!webui && isContainerRunning(webui.status),
       realtimeClients: realtimeHub.size(),
       mikrotik: {
         host: config.mikrotik.host,
         wanHost: config.mikrotik.wanHost || null,
         managementUrl: managementUrl() || null,
-        version: (resource as any)?.version || null,
-        cpuLoad: (resource as any)?.['cpu-load'] || null,
-        freeMemory: (resource as any)?.['free-memory'] || null,
+        version: normalized.version,
+        cpuLoad: normalized.cpuLoadPct != null ? `${normalized.cpuLoadPct}%` : null,
+        freeMemory: normalized.freeMemoryBytes != null
+          ? `${Math.round(normalized.freeMemoryBytes / (1024 ** 3) * 10) / 10}GiB`
+          : null,
+        cpu: normalized.cpu,
+        cpuCount: normalized.cpuCount,
+        uptime: normalized.uptimeLabel,
+        boardName: normalized.boardName,
+        architecture: normalized.architecture,
       },
+      routerMonitor,
       timestamp: Date.now(),
     };
+  });
+
+  app.get('/api/dashboard/router-monitor', { preHandler: [app.authenticate] }, async (req) => {
+    const hours = Math.min(24, Math.max(1, parseInt(String((req.query as { hours?: string }).hours || '4'), 10) || 4));
+    return getRouterMonitor(hours);
   });
 
   // WAN status list — merged với container thực tế trên router
@@ -152,6 +167,27 @@ export default async function systemRoutes(app: FastifyInstance) {
         hubContainer: 'proxy3p-hub',
       },
     };
+  });
+
+  // SSH brute-force blacklist status
+  app.get('/api/system/ssh-blacklist', { preHandler: [app.authenticate] }, async () => {
+    const { sshBlacklistService } = await import('../services/mikrotik/SshBlacklistService');
+    const status = await sshBlacklistService.getStatus();
+    return { ...status, maxFailures: config.sshBlacklist.maxFailures };
+  });
+
+  app.post('/api/system/ssh-blacklist/ensure', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const u = req.user as any;
+    if (u.role !== 'admin') return reply.code(403).send({ error: 'admin only' });
+    try {
+      const { sshBlacklistService } = await import('../services/mikrotik/SshBlacklistService');
+      await sshBlacklistService.ensure();
+      const status = await sshBlacklistService.getStatus();
+      await audit({ userId: u.uid, username: u.username, action: 'ssh-blacklist-ensure', ip: req.ip });
+      return { ok: true, status };
+    } catch (e: any) {
+      return reply.code(400).send({ error: e.message });
+    }
   });
 
   // RouterOS system scripts (quayip, duckdns, protect)

@@ -4,7 +4,7 @@
 # Cần cả RAW (prerouting) lẫn filter (input) — RAW chặn trước bogon rules
 # ============================================================
 
-:local mgmtPorts "8088,22,80,443,8291"
+:local mgmtPorts "8088,22222,80,443,8291"
 :local changes 0
 
 :if ([:len [/ip/service/find name=winbox disabled=yes]] > 0) do={

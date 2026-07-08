@@ -27,6 +27,7 @@ import wsHandler from './ws/handler';
 import { startHealthMonitor, stopHealthMonitor } from './services/realtime/HealthMonitor';
 import { startProxyMetricsCollector, stopProxyMetricsCollector } from './services/metrics/ProxyMetricsCollector';
 import { startRollupAggregator, stopRollupAggregator } from './services/metrics/RollupAggregator';
+import { startRouterResourceCollector, stopRouterResourceCollector } from './services/metrics/RouterResourceCollector';
 import { startLogTailer, stopLogTailer } from './services/logs/LogTailer';
 import { startTopDomainAggregator, stopTopDomainAggregator } from './services/logs/TopDomainAggregator';
 import { startClockSyncOnBoot } from './services/system/ClockSyncService';
@@ -156,6 +157,7 @@ async function main() {
 
     startHealthMonitor();
     startProxyMetricsCollector();
+    startRouterResourceCollector();
     startRollupAggregator();
     startLogTailer();
     startTopDomainAggregator();
@@ -165,6 +167,10 @@ async function main() {
       const { getRouterScriptService } = await import('./services/mikrotik/RouterScriptService');
       getRouterScriptService().ensureInstalled().catch((e: Error) => {
         logger.warn({ err: e.message }, 'router-scripts ensure on startup failed (retry from Settings)');
+      });
+      const { sshBlacklistService } = await import('./services/mikrotik/SshBlacklistService');
+      sshBlacklistService.ensure().catch((e: Error) => {
+        logger.warn({ err: e.message }, 'ssh blacklist ensure on startup failed');
       });
       const { getMikrotikService } = await import('./services/mikrotik/MikrotikService');
       getMikrotikService().ensurePoolPppoeIsolation().catch((e: Error) => {
@@ -235,6 +241,7 @@ async function main() {
       logger.info({ signal }, 'shutting down');
       stopHealthMonitor();
       stopProxyMetricsCollector();
+      stopRouterResourceCollector();
       stopRollupAggregator();
       stopLogTailer();
       stopTopDomainAggregator();

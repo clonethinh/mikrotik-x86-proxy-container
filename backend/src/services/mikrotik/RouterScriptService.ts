@@ -30,6 +30,15 @@ export const MANAGED_ROUTER_SCRIPTS = [
     defaultInterval: '2m',
     longRunning: false,
   },
+  {
+    name: 'hub-ssh-blacklist',
+    label: 'SSH blacklist',
+    description: 'Đọc log login failure SSH → blacklist IP sau 5 lần sai (1 ngày).',
+    rsc: 'disk1/webuiproxymikrotik/ensure-ssh-blacklist.rsc',
+    schedulerNames: ['hub-ssh-blacklist'],
+    defaultInterval: '1m',
+    longRunning: false,
+  },
 ] as const;
 
 export type ManagedRouterScriptName = (typeof MANAGED_ROUTER_SCRIPTS)[number]['name'];

@@ -1,10 +1,17 @@
 import { useEffect, useState } from 'react';
-import { Card, Form, Input, Button, Typography, Descriptions, Tag, App, Divider, Space, Alert, Select, InputNumber, Table } from 'antd';
-import { ApiOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleOutlined, SyncOutlined, PlayCircleOutlined, ReloadOutlined } from '@ant-design/icons';
+import { Form, Input, Button, Typography, Descriptions, Tag, App, Divider, Space, Select, InputNumber, Table, Row, Col } from 'antd';
+import DismissibleAlert from '../components/ui/DismissibleAlert';
+import SettingsSectionCard from '../components/ui/SettingsSectionCard';
+import ProxyPageShell from '../components/proxy/ProxyPageShell';
+import {
+  ApiOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleOutlined, SyncOutlined,
+  PlayCircleOutlined, ReloadOutlined, SettingOutlined, UserOutlined, LockOutlined,
+  ThunderboltOutlined, CodeOutlined, InfoCircleOutlined,
+} from '@ant-design/icons';
 import { api, AutoProxySettings, ClockSyncResult, MikrotikTestResult, RouterScriptStatus } from '../services/api';
 import { useAuth } from '../services/auth';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface DeployInfo {
   target: string;
@@ -122,26 +129,90 @@ export default function SettingsPage() {
   };
 
   return (
-    <div>
-      <Title level={3} style={{ margin: '0 0 12px' }}>Settings</Title>
+    <ProxyPageShell
+      className="settings-page"
+      title={<><SettingOutlined style={{ marginRight: 8, color: '#1677FF' }} />Cài đặt hệ thống</>}
+      subtitle="Tài khoản, auto-proxy pool, script router và thông tin deploy"
+    >
+      <Row gutter={[16, 0]}>
+        <Col xs={24} lg={12}>
+          <SettingsSectionCard
+            title="Tài khoản"
+            description="Thông tin đăng nhập và đổi mật khẩu"
+            icon={<UserOutlined />}
+            accent="#1677FF"
+          >
+            <div className="settings-account-meta">
+              <div className="settings-account-chip">
+                <span className="settings-account-chip__label">Username</span>
+                <Text strong>{user?.username}</Text>
+              </div>
+              <div className="settings-account-chip">
+                <span className="settings-account-chip__label">Role</span>
+                <Tag color="blue" bordered={false}>{user?.role}</Tag>
+              </div>
+            </div>
+            <Divider style={{ margin: '12px 0 16px' }} />
+            <Form form={pwForm} layout="vertical" onFinish={changePassword}>
+              <Form.Item name="oldPassword" label="Mật khẩu cũ" rules={[{ required: true }]}>
+                <Input.Password prefix={<LockOutlined />} />
+              </Form.Item>
+              <Form.Item name="newPassword" label="Mật khẩu mới" rules={[{ required: true, min: 6, message: '≥ 6 ký tự' }]}>
+                <Input.Password prefix={<LockOutlined />} />
+              </Form.Item>
+              <Button type="primary" htmlType="submit">Đổi mật khẩu</Button>
+            </Form>
+          </SettingsSectionCard>
+        </Col>
 
-      <Card title="Tài khoản" style={{ marginBottom: 16 }}>
-        <p><b>Username:</b> {user?.username}</p>
-        <p><b>Role:</b> <Tag color="blue">{user?.role}</Tag></p>
-        <Divider />
-        <Form form={pwForm} layout="vertical" onFinish={changePassword} style={{ maxWidth: 400 }}>
-          <Form.Item name="oldPassword" label="Mật khẩu cũ" rules={[{ required: true }]}>
-            <Input.Password />
-          </Form.Item>
-          <Form.Item name="newPassword" label="Mật khẩu mới" rules={[{ required: true, min: 6, message: '≥ 6 ký tự' }]}>
-            <Input.Password />
-          </Form.Item>
-          <Button type="primary" htmlType="submit">Đổi mật khẩu</Button>
-        </Form>
-      </Card>
+        <Col xs={24} lg={12}>
+          <SettingsSectionCard
+            title="MikroTik"
+            description="Test REST/SSH và đồng bộ thời gian"
+            icon={<ApiOutlined />}
+            accent="#13C2C2"
+          >
+            <Space wrap>
+              <Button icon={<ApiOutlined />} loading={testing} onClick={testConn}>Test kết nối</Button>
+              <Button icon={<ClockCircleOutlined />} loading={syncing} onClick={syncTime}>Sync time</Button>
+            </Space>
+            {test && (
+              <div style={{ marginTop: 14 }}>
+                <DismissibleAlert
+                  bannerId="settings-mikrotik-test"
+                  persist={false}
+                  type={test.rest && test.ssh ? 'success' : 'warning'}
+                  showIcon
+                  message={test.rest && test.ssh ? 'Kết nối OK' : 'Có lỗi'}
+                  description={(
+                    <Space direction="vertical" size={4}>
+                      <div>
+                        REST:&nbsp;
+                        {test.rest ? <Tag icon={<CheckCircleFilled />} color="success">{test.restLatencyMs}ms</Tag>
+                          : <Tag icon={<CloseCircleFilled />} color="error">{test.restError}</Tag>}
+                      </div>
+                      <div>
+                        SSH:&nbsp;
+                        {test.ssh ? <Tag icon={<CheckCircleFilled />} color="success">{test.sshLatencyMs}ms</Tag>
+                          : <Tag icon={<CloseCircleFilled />} color="error">{test.sshError}</Tag>}
+                      </div>
+                    </Space>
+                  )}
+                />
+              </div>
+            )}
+          </SettingsSectionCard>
+        </Col>
+      </Row>
 
-      <Card title="Auto-proxy (quay vô hạn pppoe-out)" style={{ marginBottom: 16 }}>
-        <Alert
+      <SettingsSectionCard
+        title="Auto-proxy"
+        description="Pool rotation — tự nhận pppoe-outX và provision proxy"
+        icon={<ThunderboltOutlined />}
+        accent="#722ED1"
+      >
+        <DismissibleAlert
+          bannerId="settings-auto-proxy-info"
           type="info"
           showIcon
           style={{ marginBottom: 12 }}
@@ -149,41 +220,60 @@ export default function SettingsPage() {
           description="semi = đếm ngược 8s rồi tự provision (có thể hủy) · full = tự động ngay · off = chỉ hiển thị, không tạo proxy"
         />
         {autoProxy && (
-          <Form form={autoForm} layout="vertical" onFinish={saveAutoProxy} initialValues={autoProxy} style={{ maxWidth: 480 }}>
-            <Form.Item name="mode" label="Chế độ" rules={[{ required: true }]}>
-              <Select options={[
-                { value: 'semi', label: 'Semi — đếm ngược 8s' },
-                { value: 'full', label: 'Full — tự động ngay' },
-                { value: 'off', label: 'Off — chỉ discovery' },
-              ]} />
-            </Form.Item>
-            <Form.Item name="maxConcurrent" label="Max proxy đồng thời" rules={[{ required: true }]}>
-              <InputNumber min={1} max={50} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="pollIntervalMs" label="Poll interval (ms)" rules={[{ required: true }]}>
-              <InputNumber min={5000} max={120000} step={1000} style={{ width: '100%' }} />
-            </Form.Item>
-            <Form.Item name="staleTtlMs" label="Stale TTL (ms) — xóa sạch proxy sau khi WAN mất" rules={[{ required: true }]}>
-              <InputNumber min={60000} max={3600000} step={60000} style={{ width: '100%' }} />
-            </Form.Item>
+          <Form form={autoForm} layout="vertical" onFinish={saveAutoProxy} initialValues={autoProxy}>
+            <Row gutter={16}>
+              <Col xs={24} md={12}>
+                <Form.Item name="mode" label="Chế độ" rules={[{ required: true }]}>
+                  <Select options={[
+                    { value: 'semi', label: 'Semi — đếm ngược 8s' },
+                    { value: 'full', label: 'Full — tự động ngay' },
+                    { value: 'off', label: 'Off — chỉ discovery' },
+                  ]} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item name="maxConcurrent" label="Max proxy đồng thời" rules={[{ required: true }]}>
+                  <InputNumber min={1} max={50} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item name="pollIntervalMs" label="Poll interval (ms)" rules={[{ required: true }]}>
+                  <InputNumber min={5000} max={120000} step={1000} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+              <Col xs={24} md={12}>
+                <Form.Item name="staleTtlMs" label="Stale TTL (ms)" rules={[{ required: true }]}>
+                  <InputNumber min={60000} max={3600000} step={60000} style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
             <Button type="primary" htmlType="submit" icon={<SyncOutlined />} loading={savingAuto}>
               Lưu auto-proxy
             </Button>
           </Form>
         )}
-      </Card>
+      </SettingsSectionCard>
 
       {user?.role === 'admin' && (
-        <Card title="Router Scripts (quayip / DuckDNS / protect)" style={{ marginBottom: 16 }}
-          extra={
+        <SettingsSectionCard
+          title="Router Scripts"
+          description="quayip · DuckDNS · protect trên MikroTik"
+          icon={<CodeOutlined />}
+          accent="#FA8C16"
+          extra={(
             <Space>
               <Button icon={<ReloadOutlined />} loading={scriptsLoading} onClick={loadRouterScripts}>Refresh</Button>
               <Button type="primary" icon={<SyncOutlined />} loading={ensuringScripts} onClick={ensureRouterScripts}>
-                Cài đặt script
+                Cài đặt
               </Button>
             </Space>
-          }>
-          <Alert type="info" showIcon style={{ marginBottom: 12 }}
+          )}
+        >
+          <DismissibleAlert
+            bannerId="settings-router-scripts-info"
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
             message="Script hệ thống trên MikroTik"
             description="quayip: quay IP pool pppoe-out · duckdns: cập nhật DDNS từ pppoe-wan · protect: bảo vệ pppoe-wan"
           />
@@ -193,6 +283,7 @@ export default function SettingsPage() {
             loading={scriptsLoading}
             dataSource={routerScripts}
             pagination={false}
+            className="proxy-table-card"
             columns={[
               { title: 'Script', dataIndex: 'label', key: 'label', render: (v: string, r: RouterScriptStatus) => (
                 <Space direction="vertical" size={0}>
@@ -202,11 +293,11 @@ export default function SettingsPage() {
               )},
               { title: 'Cài đặt', key: 'installed', width: 90,
                 render: (_: unknown, r: RouterScriptStatus) => (
-                  r.installed ? <Tag color="success">OK</Tag> : <Tag color="error">Thiếu</Tag>
+                  r.installed ? <Tag color="success" bordered={false}>OK</Tag> : <Tag color="error" bordered={false}>Thiếu</Tag>
                 )},
               { title: 'Scheduler', key: 'sched', width: 120,
                 render: (_: unknown, r: RouterScriptStatus) => r.scheduler
-                  ? <Tag>{r.scheduler.interval || '—'}</Tag> : <Tag>—</Tag> },
+                  ? <Tag bordered={false}>{r.scheduler.interval || '—'}</Tag> : <Tag bordered={false}>—</Tag> },
               { title: 'Run count', dataIndex: 'runCount', key: 'runCount', width: 90 },
               { title: 'Lần chạy cuối', dataIndex: 'lastStarted', key: 'lastStarted', width: 160,
                 render: (v: string | null) => v || '—' },
@@ -221,45 +312,19 @@ export default function SettingsPage() {
                 )},
             ]}
           />
-        </Card>
+        </SettingsSectionCard>
       )}
 
-      <Card title="Mikrotik" style={{ marginBottom: 16 }}>
-        <Space>
-          <Button icon={<ApiOutlined />} loading={testing} onClick={testConn}>Test kết nối</Button>
-          <Button icon={<ClockCircleOutlined />} loading={syncing} onClick={syncTime}>Sync time</Button>
-        </Space>
-        {test && (
-          <div style={{ marginTop: 12 }}>
-            <Alert
-              type={test.rest && test.ssh ? 'success' : 'warning'}
-              showIcon
-              message={test.rest && test.ssh ? 'Kết nối OK' : 'Có lỗi'}
-              description={
-                <Space direction="vertical" size={4}>
-                  <div>
-                    REST:&nbsp;
-                    {test.rest ? <Tag icon={<CheckCircleFilled />} color="success">{test.restLatencyMs}ms</Tag> :
-                              <Tag icon={<CloseCircleFilled />} color="error">{test.restError}</Tag>}
-                  </div>
-                  <div>
-                    SSH:&nbsp;
-                    {test.ssh ? <Tag icon={<CheckCircleFilled />} color="success">{test.sshLatencyMs}ms</Tag> :
-                              <Tag icon={<CloseCircleFilled />} color="error">{test.sshError}</Tag>}
-                  </div>
-                </Space>
-              }
-            />
-          </div>
-        )}
-      </Card>
-
       {info && (
-        <Card title="Thông tin hệ thống">
-          <Descriptions column={1} bordered size="small">
+        <SettingsSectionCard
+          title="Thông tin deploy"
+          description="Target, network formula và 3proxy image"
+          icon={<InfoCircleOutlined />}
+          accent="#52C41A"
+        >
+          <Descriptions column={{ xs: 1, sm: 2 }} bordered size="small">
             <Descriptions.Item label="Deploy target">
-              <Tag color={info.target === 'router' ? 'green' : 'orange'}>{info.target}</Tag>
-              {info.target === 'router' ? ' — Backend chạy trong container trên Mikrotik' : ' — Backend chạy ngoài (host/VPS)'}
+              <Tag color={info.target === 'router' ? 'success' : 'warning'} bordered={false}>{info.target}</Tag>
             </Descriptions.Item>
             <Descriptions.Item label="Mikrotik host">{info.mikrotik.host}</Descriptions.Item>
             <Descriptions.Item label="Quản trị (host)">
@@ -267,19 +332,19 @@ export default function SettingsPage() {
                 ? <a href={info.mikrotik.managementUrl} target="_blank" rel="noreferrer">{info.mikrotik.wanHost || info.mikrotik.managementUrl}</a>
                 : (info.mikrotik.wanHost || '—')}
             </Descriptions.Item>
-            <Descriptions.Item label="Ghi chú">
-              IP PPPoE động — truy cập WebUI chỉ qua host (DuckDNS), không dùng IP tĩnh.
-            </Descriptions.Item>
             <Descriptions.Item label="3proxy image">{info.threeProxy.image}</Descriptions.Item>
             <Descriptions.Item label="3proxy tarball">{info.threeProxy.tarball}</Descriptions.Item>
             <Descriptions.Item label="Bridge">{info.network.bridgeName}</Descriptions.Item>
-            <Descriptions.Item label="Veth IP formula">{info.network.vethIpFormula || `${info.network.vethNetworkBase}.N.2/30`}</Descriptions.Item>
-            <Descriptions.Item label="Max pppoe-out index">{info.network.maxPppoeIdx ?? '—'}</Descriptions.Item>
-            <Descriptions.Item label="External HTTP port">{info.network.portFormula || `${info.network.extHttpPortBase}+N`}</Descriptions.Item>
-            <Descriptions.Item label="External SOCKS port">{info.network.extSocksPortBase}+N</Descriptions.Item>
+            <Descriptions.Item label="Veth IP">{info.network.vethIpFormula || `${info.network.vethNetworkBase}.N.2/30`}</Descriptions.Item>
+            <Descriptions.Item label="Max pppoe-out">{info.network.maxPppoeIdx ?? '—'}</Descriptions.Item>
+            <Descriptions.Item label="HTTP port">{info.network.portFormula || `${info.network.extHttpPortBase}+N`}</Descriptions.Item>
+            <Descriptions.Item label="SOCKS port">{info.network.extSocksPortBase}+N</Descriptions.Item>
+            <Descriptions.Item label="Ghi chú" span={2}>
+              IP PPPoE động — truy cập WebUI qua host (DuckDNS), không dùng IP tĩnh.
+            </Descriptions.Item>
           </Descriptions>
-        </Card>
+        </SettingsSectionCard>
       )}
-    </div>
+    </ProxyPageShell>
   );
 }

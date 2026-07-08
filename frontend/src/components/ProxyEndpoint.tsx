@@ -1,12 +1,11 @@
 import { Button, Flex, Tag, Tooltip, Typography } from 'antd';
 import { CopyOutlined, LinkOutlined } from '@ant-design/icons';
-import { formatProxy } from '../lib/proxyUtils';
-import type { WanInfo } from '../services/api';
+import { formatProxy, type ProxyEndpointRow } from '../lib/proxyUtils';
 
 const { Text } = Typography;
 
 interface Props {
-  row: WanInfo & { password?: string };
+  row: ProxyEndpointRow;
   kind: 'http' | 'socks5';
   onCopy: (text: string, label?: string) => void;
   compact?: boolean;

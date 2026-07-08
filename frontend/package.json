@@ -5,13 +5,14 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:preview": "vite --config vite.config.preview.ts",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "dev:review": "vite --config vite.config.review.ts",
     "preview:review": "vite preview --config vite.config.review.ts"
   },
   "dependencies": {
-    "@ant-design/icons": "^5.6.1",
+    "@ant-design/icons": "^6.3.2",
     "@ant-design/plots": "^2.6.8",
     "antd": "^6.5.0",
     "dayjs": "^1.11.13",

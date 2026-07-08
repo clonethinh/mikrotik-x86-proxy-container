@@ -5,7 +5,7 @@
 # ============================================================
 
 :local mgmtIf "pppoe-wan"
-:local mgmtPorts "8088,22,80,443,8291"
+:local mgmtPorts "8088,22222,80,443,8291"
 :local changes 0
 
 # Xóa rule cũ mở proxy trên pppoe-wan

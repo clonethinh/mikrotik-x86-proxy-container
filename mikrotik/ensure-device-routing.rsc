@@ -21,6 +21,6 @@
 :local bypass "dev-mgmt-bypass"
 /ip firewall mangle remove [find comment=$bypass]
 /ip firewall mangle add chain=prerouting action=accept protocol=tcp \
-    src-address-list=hub-lan dst-port=8088,22,80,443,8291 comment=$bypass place-before=0
+    src-address-list=hub-lan dst-port=8088,22222,80,443,8291 comment=$bypass place-before=0
 
 :put "ensure-device-routing: skip lists + mgmt bypass OK"

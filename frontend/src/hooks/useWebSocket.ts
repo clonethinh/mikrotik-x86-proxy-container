@@ -2,6 +2,7 @@
 import { useEffect, useRef } from 'react';
 import { getToken } from '../services/api';
 import { useWSStore } from '../services/ws';
+import { isUiPreview } from '../lib/env';
 
 export function useWebSocket(onEvent?: (msg: any) => void) {
   const wsRef = useRef<WebSocket | null>(null);
@@ -10,6 +11,11 @@ export function useWebSocket(onEvent?: (msg: any) => void) {
   const { setConnected, emit } = useWSStore();
 
   useEffect(() => {
+    if (isUiPreview) {
+      setConnected(true);
+      return;
+    }
+
     let stopped = false;
     let retryTimer: any = null;
 

@@ -1,6 +1,8 @@
 // Auth store
 import { create } from 'zustand';
 import { api, getToken, setToken } from '../services/api';
+import { isUiPreview } from '../lib/env';
+import { PREVIEW_USER } from '../mocks/previewData';
 
 interface User { id: number; username: string; role: string }
 
@@ -16,6 +18,11 @@ export const useAuth = create<AuthState>((set) => ({
   user: null,
   loading: true,
   init: async () => {
+    if (isUiPreview) {
+      setToken('preview-mock-token');
+      set({ user: PREVIEW_USER, loading: false });
+      return;
+    }
     const token = getToken();
     if (!token) { set({ loading: false, user: null }); return; }
     try {

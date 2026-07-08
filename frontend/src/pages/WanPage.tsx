@@ -1,17 +1,23 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
-  Table, Tag, Typography, Card, Space, Statistic, Row, Col,
-  Button, Switch, App, Tooltip, Progress, Modal, Alert, Input, Segmented, Popconfirm, Drawer,
+  Table, Tag, Typography, Card, Space, Button, Switch, App, Tooltip, Progress,
+  Input, Segmented,
 } from 'antd';
+import AppDrawer from '../components/ui/AppDrawer';
+import ProxyToolbar from '../components/ui/ProxyToolbar';
+import ProxyPageShell, { ProxyCode } from '../components/proxy/ProxyPageShell';
+import ProxyStatsRow from '../components/proxy/ProxyStatsRow';
+import { HTTP_PORT_BASE, SOCKS_PORT_BASE } from '../lib/proxyUtils';
 import {
-  GlobalOutlined, PlayCircleOutlined, PauseCircleOutlined, ThunderboltOutlined,
-  CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, ApiOutlined,
+  GlobalOutlined, PauseCircleOutlined, ThunderboltOutlined,
+  CheckCircleOutlined, CloseCircleOutlined, RocketOutlined, ApiOutlined, ReloadOutlined,
+  WarningOutlined,
 } from '@ant-design/icons';
 import { api, WanInfo } from '../services/api';
 import { useWSEvent } from '../services/ws';
 import { useTablePagination } from '../hooks/useTablePagination';
 
-const { Title, Text } = Typography;
+const { Text } = Typography;
 
 interface WanActionEvent {
   pppoeIdx?: number;
@@ -352,97 +358,99 @@ export default function WanPage() {
     },
   ];
 
+  const withProxy = wans.filter(w => w.hasProxy).length;
+
   return (
-    <div>
-      <Title level={3}>WAN Status</Title>
-      <Text type="secondary">
-        Realtime · PPPoE up/down & IP public · Tạo nhanh pppoe-outX · Bật/Tắt kèm auto-proxy (hub 2×50)
-      </Text>
-
-      <div style={{ height: 16 }} />
-
-      <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col xs={12} md={6}><Card><Statistic title="Tổng WAN" value={wans.length} prefix={<GlobalOutlined />} /></Card></Col>
-        <Col xs={12} md={6}><Card><Statistic title="UP" value={up} valueStyle={{ color: '#52c41a' }} prefix={<CheckCircleOutlined />} /></Card></Col>
-        <Col xs={12} md={6}><Card><Statistic title="DOWN" value={down} valueStyle={{ color: '#ff4d4f' }} prefix={<CloseCircleOutlined />} /></Card></Col>
-        <Col xs={12} md={6}>
-          <Card>
-            <Statistic
-              title="Có proxy"
-              value={wans.filter(w => w.hasProxy).length}
-              prefix={<ApiOutlined />}
-              valueStyle={{ color: '#1677ff' }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
+    <ProxyPageShell
+      title={<><GlobalOutlined style={{ marginRight: 8, color: '#1677FF' }} />WAN Control</>}
+      subtitle={(
+        <>
+          Bật/tắt PPPoE, quay IP, tạo <ProxyCode>pppoe-outX</ProxyCode> tiếp theo · cổng proxy{' '}
+          <ProxyCode>{HTTP_PORT_BASE}+N</ProxyCode> / <ProxyCode>{SOCKS_PORT_BASE}+N</ProxyCode>
+        </>
+      )}
+      stats={(
+        <ProxyStatsRow
+          items={[
+            { key: 'all', title: 'Tổng WAN', value: wans.length, icon: <GlobalOutlined />, accent: 'primary' },
+            { key: 'up', title: 'Đang UP', value: up, icon: <CheckCircleOutlined />, accent: 'success' },
+            { key: 'down', title: 'DOWN', value: down, icon: <CloseCircleOutlined />, accent: 'error', valueStyle: down ? { color: '#FF4D4F' } : undefined },
+            { key: 'proxy', title: 'Có proxy', value: withProxy, icon: <ApiOutlined />, accent: 'purple' },
+          ]}
+        />
+      )}
+      toolbar={(
+        <ProxyToolbar
+          filters={(
+            <>
+              <Input.Search
+                placeholder="Tìm PPPoE / IP public…"
+                allowClear
+                style={{ width: 240, maxWidth: '100%' }}
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+              />
+              <Segmented
+                options={[
+                  { label: 'Tất cả', value: 'all' },
+                  { label: 'UP', value: 'true' },
+                  { label: 'DOWN', value: 'false' },
+                ]}
+                value={statusFilter}
+                onChange={(v) => setStatusFilter(v as string)}
+              />
+            </>
+          )}
+          actions={(
+            <>
+              <Button icon={<ReloadOutlined />} onClick={load}>Làm mới</Button>
+              <Tooltip title="Clone pppoe-out1 → tạo index tiếp, bật + auto-proxy">
+                <Button type="primary" icon={<ThunderboltOutlined />} loading={creatingPppoe} onClick={() => createNextPppoe(true)}>
+                  + PPPoE tiếp
+                </Button>
+              </Tooltip>
+              <Tooltip title="Chỉ tạo interface, chưa bật dial">
+                <Button loading={creatingPppoe} onClick={() => createNextPppoe(false)}>Tạo (chưa bật)</Button>
+              </Tooltip>
+            </>
+          )}
+          bulk={selected.length > 0 ? (
+            <>
+              <Tag color="blue" bordered={false}>Đã chọn {selected.length}</Tag>
+              <Button type="primary" icon={<RocketOutlined />} loading={bulkBusy} onClick={bulkEnable}>
+                Bật {selected.length}
+              </Button>
+              <Button icon={<PauseCircleOutlined />} loading={bulkBusy} onClick={bulkDisable}>
+                Tắt {selected.length}
+              </Button>
+            </>
+          ) : undefined}
+        />
+      )}
+    >
       {progress.visible && progress.total > 0 && (
-        <Card size="small" style={{ marginBottom: 12, background: progress.failed > 0 ? '#fff7e6' : '#f6ffed' }}>
-          <Space direction="vertical" style={{ width: '100%' }} size={4}>
+        <Card
+          size="small"
+          className={`wan-bulk-progress ${progress.failed > 0 ? 'wan-bulk-progress--warn' : 'wan-bulk-progress--ok'}`}
+          style={{ marginBottom: 16 }}
+        >
+          <Space direction="vertical" style={{ width: '100%' }} size={6}>
             <Space wrap>
-              <Text strong>Bulk đang chạy / đã xong:</Text>
-              <Tag color="blue">{progress.done}/{progress.total}</Tag>
-              <Tag color="success">{progress.succeeded} OK</Tag>
-              {progress.failed > 0 && <Tag color="error">{progress.failed} FAIL</Tag>}
+              <Text strong>Bulk operation</Text>
+              <Tag color="blue" bordered={false}>{progress.done}/{progress.total}</Tag>
+              <Tag color="success" bordered={false}>{progress.succeeded} OK</Tag>
+              {progress.failed > 0 && <Tag color="error" bordered={false}>{progress.failed} FAIL</Tag>}
             </Space>
             <Progress
               percent={Math.round((progress.done / progress.total) * 100)}
               status={progress.failed > 0 ? 'exception' : 'success'}
-              size="small"
+              strokeWidth={8}
             />
           </Space>
         </Card>
       )}
 
-      <Space style={{ marginBottom: 12, flexWrap: 'wrap' }}>
-        <Input.Search
-          placeholder="Tìm PPPoE / IP…"
-          allowClear
-          style={{ width: 200 }}
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-        />
-        <Segmented
-          options={[
-            { label: 'Tất cả', value: 'all' },
-            { label: 'UP', value: 'true' },
-            { label: 'DOWN', value: 'false' },
-          ]}
-          value={statusFilter}
-          onChange={(v) => setStatusFilter(v as string)}
-          size="small"
-        />
-        <Button onClick={load}>Refresh</Button>
-        <Tooltip title="Clone pppoe-out1 → tạo index tiếp theo, bật PPPoE + auto-proxy">
-          <Button
-            type="primary"
-            icon={<ThunderboltOutlined />}
-            loading={creatingPppoe}
-            onClick={() => createNextPppoe(true)}
-          >
-            + Tạo PPPoE tiếp
-          </Button>
-        </Tooltip>
-        <Tooltip title="Chỉ tạo interface, chưa bật dial">
-          <Button loading={creatingPppoe} onClick={() => createNextPppoe(false)}>
-            Tạo (chưa bật)
-          </Button>
-        </Tooltip>
-        {selected.length > 0 && (
-          <>
-            <Tag color="blue">Đã chọn {selected.length}</Tag>
-            <Button type="primary" icon={<RocketOutlined />} loading={bulkBusy} onClick={bulkEnable}>
-              Bật {selected.length} PPPoE (+ auto-proxy)
-            </Button>
-            <Button icon={<PauseCircleOutlined />} loading={bulkBusy} onClick={bulkDisable}>
-              Tắt {selected.length}
-            </Button>
-          </>
-        )}
-      </Space>
-
-      <Card styles={{ body: { padding: 0 } }}>
+      <Card className="proxy-table-card" styles={{ body: { padding: 0 } }}>
         <Table
           rowKey="name"
           loading={loading}
@@ -451,31 +459,32 @@ export default function WanPage() {
           rowSelection={{
             selectedRowKeys: selected,
             onChange: (keys) => setSelected(keys as number[]),
-            getCheckboxProps: () => ({}),
           }}
           pagination={tablePagination}
           scroll={{ x: 1100 }}
-          size="small"
+          size="middle"
         />
       </Card>
 
-      <Drawer
-        title={resultsDrawer.title}
+      <AppDrawer
         open={resultsDrawer.open}
         onClose={() => setResultsDrawer({ ...resultsDrawer, open: false })}
-        width={560}
+        width="md"
+        icon={<WarningOutlined />}
+        title={resultsDrawer.title || 'Lỗi bulk'}
+        subtitle={`${resultsDrawer.results.length} PPPoE gặp lỗi`}
       >
-        {resultsDrawer.results.map((r: { pppoeIdx?: number; pppoeName?: string; error?: string }, i: number) => (
-          <Alert
-            key={i}
-            type="error"
-            showIcon
-            message={`pppoe-out${r.pppoeIdx ?? r.pppoeName}`}
-            description={r.error}
-            style={{ marginBottom: 8 }}
-          />
-        ))}
-      </Drawer>
-    </div>
+        <div className="drawer-error-list">
+          {resultsDrawer.results.map((r: { pppoeIdx?: number; pppoeName?: string; error?: string }, i: number) => (
+            <div key={i} className="drawer-error-item">
+              <div className="drawer-error-item__title">
+                {r.pppoeName || `pppoe-out${r.pppoeIdx ?? '?'}`}
+              </div>
+              <p className="drawer-error-item__msg">{r.error || 'Unknown error'}</p>
+            </div>
+          ))}
+        </div>
+      </AppDrawer>
+    </ProxyPageShell>
   );
 }

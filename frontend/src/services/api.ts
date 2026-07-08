@@ -1,4 +1,7 @@
 // API client
+import { isUiPreview } from '../lib/env';
+import { previewHttp } from '../mocks/previewApi';
+
 const TOKEN_KEY = 'wp_token';
 
 export function getToken(): string | null {
@@ -11,6 +14,9 @@ export function setToken(t: string | null) {
 }
 
 async function http<T>(method: string, path: string, body?: any): Promise<T> {
+  if (isUiPreview) {
+    return previewHttp<T>(method, path, body);
+  }
   const headers: Record<string, string> = {};
   const token = getToken();
   if (token) headers['Authorization'] = `Bearer ${token}`;
@@ -78,6 +84,12 @@ export const api = {
   del: <T = any>(p: string) => http<T>('DELETE', p),
   /** Export: clipboard JSON or trigger file download when fileFormat is set */
   async postExport(body: Record<string, unknown>): Promise<ExportClipboardResult | { downloaded: true; filename: string }> {
+    if (isUiPreview) {
+      return {
+        text: 'http://113.22.235.51:30056:user1:preview-pass\nhttp://113.22.235.52:30057:user2:preview-pass',
+        count: 2,
+      };
+    }
     const res = await fetch('/api/proxies/export', {
       method: 'POST',
       headers: await authHeaders(true),
@@ -206,6 +218,39 @@ export interface WanDiscovery {
   error: string | null;
 }
 
+export interface RouterMonitorHistoryPoint {
+  ts: string;
+  cpuLoadPct: number | null;
+  memoryUsedPct: number | null;
+  hddUsedPct: number | null;
+  containerRunning: number;
+}
+
+export interface RouterMonitorSnapshot {
+  cpuLoadPct: number | null;
+  memoryUsedPct: number | null;
+  hddUsedPct: number | null;
+  freeMemoryBytes: number | null;
+  totalMemoryBytes: number | null;
+  freeMemoryLabel: string;
+  totalMemoryLabel: string;
+  freeHddBytes: number | null;
+  totalHddBytes: number | null;
+  freeHddLabel: string;
+  totalHddLabel: string;
+  uptimeSec: number | null;
+  uptimeLabel: string;
+  cpu: string | null;
+  cpuCount: number | null;
+  cpuFrequencyMhz: number | null;
+  boardName: string | null;
+  architecture: string | null;
+  version: string | null;
+  containerTotal: number;
+  containerRunning: number;
+  history: RouterMonitorHistoryPoint[];
+}
+
 export interface DashboardData {
   totalProxies: number;
   runningProxies: number;
@@ -222,7 +267,13 @@ export interface DashboardData {
     version?: string | null;
     cpuLoad?: string | null;
     freeMemory?: string | null;
+    cpu?: string | null;
+    cpuCount?: number | null;
+    uptime?: string | null;
+    boardName?: string | null;
+    architecture?: string | null;
   };
+  routerMonitor?: RouterMonitorSnapshot | null;
   containerProxies?: number;
   containerHealthy?: number;
   webuiRunning?: boolean;

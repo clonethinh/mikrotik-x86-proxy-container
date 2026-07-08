@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
-import { Card, Col, Row, Statistic } from 'antd';
+import { Col, Row } from 'antd';
+import MetricCard, { type MetricCardProps } from '../ui/MetricCard';
 
 export interface ProxyStatItem {
   key: string;
@@ -7,7 +8,9 @@ export interface ProxyStatItem {
   value: number | string;
   prefix?: ReactNode;
   suffix?: ReactNode;
+  icon?: ReactNode;
   valueStyle?: React.CSSProperties;
+  accent?: MetricCardProps['accent'];
 }
 
 interface Props {
@@ -15,19 +18,20 @@ interface Props {
 }
 
 export default function ProxyStatsRow({ items }: Props) {
+  const colSpan = items.length <= 4 ? 6 : 4;
   return (
     <Row gutter={[12, 12]} style={{ marginBottom: 16 }}>
       {items.map(item => (
-        <Col key={item.key} xs={12} sm={12} md={6}>
-          <Card size="small" className="proxy-stat-card" styles={{ body: { padding: '12px 16px' } }}>
-            <Statistic
-              title={item.title}
-              value={item.value}
-              prefix={item.prefix}
-              suffix={item.suffix}
-              valueStyle={item.valueStyle}
-            />
-          </Card>
+        <Col key={item.key} xs={12} sm={12} md={colSpan}>
+          <MetricCard
+            title={item.title}
+            value={item.value}
+            prefix={item.prefix}
+            suffix={item.suffix}
+            icon={item.icon}
+            valueStyle={item.valueStyle}
+            accent={item.accent}
+          />
         </Col>
       ))}
     </Row>

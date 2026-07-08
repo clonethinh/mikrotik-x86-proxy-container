@@ -58,3 +58,8 @@ scratch/
 
 # Local tooling / agent dirs
 .grok/
+
+# Sensitive router deployment info (real hosts, ports, credentials)
+router-access.json
+router-access*.json
+*-access.json

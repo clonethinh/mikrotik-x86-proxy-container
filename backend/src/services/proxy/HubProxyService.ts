@@ -52,6 +52,7 @@ import { assertProxyPoolPppoe } from '../../lib/pppoeUtils';
 import { getMikrotikService } from '../mikrotik/MikrotikService';
 import { logger } from '../../lib/logger';
 import { syncHubConfig, syncHubConfigForShard } from './HubConfigService';
+import { hubRateLimitService } from './HubRateLimitService';
 
 const hubExtracted = new Map<number, boolean>();
 let hubLanAccessReady = false;
@@ -622,6 +623,7 @@ export class HubProxyService {
         logger.warn({ err: e.message, pppoeIdx: p.pppoeIdx }, 'repairAllHubSlots slot failed');
       });
     }
+    hubRateLimitService.scheduleApply();
   }
 
   async applyHubProxy(proxyId: number): Promise<{ publicIp: string | null }> {
@@ -638,6 +640,7 @@ export class HubProxyService {
     await this.ensureHubLanAccess();
     const publicIp = await this.ensureHubSlot(proxy.pppoeIdx, egressName, { allowPendingIp: true });
     this.scheduleShardFlush(shardId);
+    hubRateLimitService.scheduleApply();
     if (config.hub.repairAllOnApply) {
       this.scheduleRepairAllHubSlots();
     }
