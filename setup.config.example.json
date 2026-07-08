@@ -1,13 +1,15 @@
 {
   "router": {
-    "host": "your-router.duckdns.org",
+    "host": "192.168.88.1",
     "sshUser": "admin",
     "sshPass": "CHANGE_ME",
     "sshPort": 22
   },
   "wan": {
     "host": "your-router.duckdns.org",
-    "managementPppoe": "pppoe-wan"
+    "managementPppoe": "pppoe-wan",
+    "duckDomain": "your-router",
+    "duckToken": "your-duckdns-token-uuid"
   },
   "webui": {
     "adminUser": "admin",
@@ -15,33 +17,58 @@
     "jwtSecret": "webuiproxymikrotik-change-in-prod-32chars-x",
     "port": 8088
   },
-  "autoProxy": {
-    "mode": "semi",
-    "pollMs": 20000,
-    "countdownMs": 8000,
-    "maxConcurrent": 16,
-    "staleTtlMs": 1800000
-  },
   "network": {
+    "configure": true,
+    "wanPort": "ether5",
+    "lanPorts": ["ether1", "ether2", "ether3", "ether4"],
+    "bridgeLan": "bridge-lan",
+    "macvlanName": "macvlan-wan",
+    "lanGateway": "192.168.88.1",
+    "lanSubnet": "192.168.88.0/24",
+    "dhcpEnabled": true,
+    "dhcpPoolStart": "192.168.88.10",
+    "dhcpPoolEnd": "192.168.88.254",
+    "dhcpServerName": "dhcp-lan",
+    "dhcpPoolName": "dhcp-lan",
+    "pppoeWan": {
+      "user": "CHANGE_PPPOE_USER",
+      "password": "CHANGE_PPPOE_PASS",
+      "profile": "default"
+    },
     "bridge": "containers-veth",
-    "vethBase": "172.18",
     "extHttpBase": 30055,
     "extSocksBase": 31055
   },
   "proxy": {
     "deployMode": "hub"
   },
+  "hub": {
+    "shardSize": 50,
+    "shardCount": 2,
+    "maxPppoeOut": 100
+  },
   "threeProxy": {
     "tarball": "disk1/3proxy.tar",
     "hubTarball": "disk1/3proxy-hub.tar",
     "hubImage": "webuiproxymikrotik/3proxy-hub:2"
   },
-  "mode": "fresh+cleanup",
+  "mode": "fresh",
   "options": {
     "skipBuild": false,
-    "skipCleanup": false,
+    "skipCleanup": true,
     "upload3proxyTar": false,
     "upload3proxyHubTar": true,
     "purgeDbOnFresh": true
+  },
+  "setup": {
+    "fullSystem": true,
+    "importRouterScripts": true,
+    "ensureRouterScriptsApi": true,
+    "syncClock": true,
+    "autoProvisionRunningWan": true,
+    "wanDiscoveryWaitSec": 120,
+    "provisionDelayMs": 12000,
+    "maxProvisionWaitSec": 900,
+    "initialProxyCount": 10
   }
 }

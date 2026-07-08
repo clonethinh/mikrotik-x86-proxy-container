@@ -3,9 +3,13 @@
  * 1-click setup — mode fresh+cleanup
  * Pipeline: preflight → build → cleanup → upload → router/deploy → purge → verify
  */
+const { assertWindowsAdmin } = require('./lib/platform');
 const { loadConfig } = require('./lib/config');
+
+assertWindowsAdmin();
 const { step, warn, finish, writeReport } = require('./lib/logger');
 const preflight = require('./steps/preflight');
+const networkBootstrap = require('./steps/network-bootstrap');
 const build = require('./steps/build');
 const cleanup = require('./steps/cleanup');
 const upload = require('./steps/upload');
@@ -13,10 +17,12 @@ const router = require('./steps/router');
 const hubPrep = require('./steps/hub-prep');
 const prerequisites = require('./steps/prerequisites');
 const purge = require('./steps/purge');
+const fleetBootstrap = require('./steps/fleet-bootstrap');
 const verify = require('./steps/verify');
 
 const STEPS = [
   ['preflight', preflight],
+  ['network-bootstrap', networkBootstrap],
   ['build', build],
   ['cleanup', cleanup],
   ['upload', upload],
@@ -24,6 +30,7 @@ const STEPS = [
   ['router', router],
   ['hub-prep', hubPrep],
   ['purge', purge],
+  ['fleet-bootstrap', fleetBootstrap],
   ['verify', verify],
 ];
 
@@ -48,14 +55,20 @@ async function main() {
     Object.assign(cli, applyCliOverrides(cfg, process.argv.slice(2)));
   } catch (e) {
     console.error('\nSETUP CONFIG ERROR:', e.message);
-    console.error('\nCopy setup.config.example.json → setup.config.json và điền router.sshPass');
+    console.error('\nChạy setup.bat (tự chạy wizard) hoặc copy setup.config.example.json → setup.config.json');
     process.exit(1);
   }
 
   console.log('============================================================');
-  console.log('  webuiproxymikrotik — 1-click setup');
+  console.log('  webuiproxymikrotik — 1-click setup HỆ THỐNG PROXY (Windows)');
   console.log(`  Target: ${cfg.router.host} | Mode: ${cfg.mode.name}`);
   console.log(`  WebUI:  ${cfg.webuiUrl}`);
+  if (cfg.network?.configure) {
+    console.log(`  Network: WAN=${cfg.network.wanPort} LAN=${(cfg.network.lanPorts || []).join(',')} DHCP=${cfg.network.dhcpEnabled !== false}`);
+  }
+  if (cfg.setup?.fullSystem !== false) {
+    console.log('  Fleet:  router scripts + hub + auto-provision pppoe-out RUNNING');
+  }
   console.log('============================================================\n');
 
   const results = {};

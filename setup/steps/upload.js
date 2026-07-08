@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { connect, exec, sftpPut } = require('../lib/ssh');
 const { step } = require('../lib/logger');
+const { buildDuckDnsRsc } = require('../lib/duckdnsBootstrap');
 
 async function ensureRemoteDir(conn, remoteDir) {
   await exec(conn, `:do {/file/add name=${remoteDir} type=directory} on-error={}`).catch(() => {});
@@ -39,6 +40,16 @@ async function run(cfg) {
 
     step('20-upload', 'Uploading mikrotik/*.rsc...');
     await uploadMikrotikScripts(conn, cfg);
+
+    if (cfg.wan.duckDomain && cfg.wan.duckToken) {
+      const tmp = path.join(cfg.root, '.setup-duckdns.rsc');
+      fs.writeFileSync(tmp, buildDuckDnsRsc(cfg.wan.duckDomain, cfg.wan.duckToken), 'utf8');
+      step('20-upload', `duckdns-pppoe-wan.rsc (${cfg.wan.duckDomain}.duckdns.org)`);
+      await sftpPut(conn, tmp, '/disk1/webuiproxymikrotik/duckdns-pppoe-wan.rsc');
+      fs.unlinkSync(tmp);
+    } else {
+      step('20-upload', 'Skip DuckDNS custom — chưa có duckDomain/duckToken trong config');
+    }
 
     if (cfg.options.upload3proxyHubTar) {
       const localHub = cfg.paths.tar3proxyHub;

@@ -6,14 +6,38 @@
     "sshPort": 22
   },
   "wan": {
-    "host": "CHANGE_HOST",
-    "managementPppoe": "pppoe-wan"
+    "host": "CHANGE_HOST.duckdns.org",
+    "managementPppoe": "pppoe-wan",
+    "duckDomain": "CHANGE_SUBDOMAIN",
+    "duckToken": "CHANGE_DUCKDNS_TOKEN"
   },
   "webui": {
     "adminUser": "admin",
     "adminPass": "admin123",
     "jwtSecret": "webuiproxymikrotik-change-in-prod-32chars-x",
     "port": 8088
+  },
+  "network": {
+    "configure": true,
+    "wanPort": "ether5",
+    "lanPorts": ["ether1", "ether2", "ether3", "ether4"],
+    "bridgeLan": "bridge-lan",
+    "macvlanName": "macvlan-wan",
+    "lanGateway": "192.168.88.1",
+    "lanSubnet": "192.168.88.0/24",
+    "dhcpEnabled": true,
+    "dhcpPoolStart": "192.168.88.10",
+    "dhcpPoolEnd": "192.168.88.254",
+    "dhcpServerName": "dhcp-lan",
+    "dhcpPoolName": "dhcp-lan",
+    "pppoeWan": {
+      "user": "CHANGE_PPPOE_USER",
+      "password": "CHANGE_PPPOE_PASS",
+      "profile": "default"
+    },
+    "bridge": "containers-veth",
+    "extHttpBase": 30055,
+    "extSocksBase": 31055
   },
   "proxy": {
     "deployMode": "hub"
@@ -35,5 +59,16 @@
     "upload3proxyTar": false,
     "upload3proxyHubTar": true,
     "purgeDbOnFresh": true
+  },
+  "setup": {
+    "fullSystem": true,
+    "importRouterScripts": true,
+    "ensureRouterScriptsApi": true,
+    "syncClock": true,
+    "autoProvisionRunningWan": true,
+    "wanDiscoveryWaitSec": 120,
+    "provisionDelayMs": 12000,
+    "maxProvisionWaitSec": 900,
+    "initialProxyCount": 10
   }
 }

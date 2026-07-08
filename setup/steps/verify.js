@@ -17,15 +17,22 @@ async function run(cfg) {
     warn(`Health check failed: ${e.message}`);
   }
 
-  step('99-verify', 'Login + fleet WAN count...');
+  step('99-verify', 'Login + fleet + proxy count...');
   try {
     const token = await login(cfg.webuiUrl, cfg.webui.adminUser, cfg.webui.adminPass);
     checks.login = true;
     const wan = await request('GET', `${cfg.webuiUrl}/api/wan`, null, token);
-    const count = Array.isArray(wan.data) ? wan.data.length : 0;
-    checks.wanCount = count;
-    step('99-verify', `Fleet: ${count} WAN`);
-    if (count > 1) warn(`Expected ~1 WAN (management only), got ${count}`);
+    const wans = Array.isArray(wan.data) ? wan.data : [];
+    checks.wanCount = wans.length;
+    checks.wanRunning = wans.filter(w => w.running).length;
+    const proxies = await request('GET', `${cfg.webuiUrl}/api/proxies`, null, token);
+    const plist = Array.isArray(proxies.data) ? proxies.data : [];
+    checks.proxyTotal = plist.length;
+    checks.proxyRunning = plist.filter(p => p.status === 'running').length;
+    step('99-verify', `WAN: ${checks.wanRunning}/${checks.wanCount} running | Proxy: ${checks.proxyRunning}/${checks.proxyTotal}`);
+    if (cfg.setup?.autoProvisionRunningWan && checks.wanRunning > 0 && checks.proxyRunning === 0) {
+      warn('Có WAN running nhưng chưa có proxy — kiểm tra WAN page hoặc chạy Provision now');
+    }
   } catch (e) {
     checks.login = false;
     warn(`Login/fleet failed: ${e.message}`);

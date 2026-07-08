@@ -51,6 +51,12 @@ function buildContainerEnv(cfg) {
     `AUTO_PROXY_STALE_TTL_MS=${a.staleTtlMs}`,
   ];
   if (cfg.wan.host) entries.push(`MIKROTIK_WAN_HOST=${cfg.wan.host}`);
+  if (cfg.wan.duckDomain) {
+    const fqdn = cfg.wan.host || `${cfg.wan.duckDomain}.duckdns.org`;
+    entries.push(`DUCKDNS_DOMAIN=${fqdn}`);
+  }
+  if (n.lanPorts?.length) entries.push(`LAN_INTERFACES=${n.lanPorts.join(',')}`);
+  if (n.lanSubnet) entries.push(`LAN_SUBNETS=${n.lanSubnet}`);
   if (cfg.wan.host && n.extHttpBase) {
     entries.push(`EXT_HTTP_PORT_BASE=${n.extHttpBase}`);
     entries.push(`EXT_SOCKS_PORT_BASE=${n.extSocksBase || n.extHttpBase + 1000}`);

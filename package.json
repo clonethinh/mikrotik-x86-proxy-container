@@ -3,13 +3,13 @@
   "private": true,
   "description": "WebUI proxy MikroTik — source gốc tại repo local, deploy 1-click lên router mới",
   "scripts": {
-    "setup": "node setup/orchestrator.js",
-    "setup:new": "node scripts/setup-wizard.js && node setup/orchestrator.js",
-    "setup:wizard": "node scripts/setup-wizard.js",
-    "setup:preflight": "node setup/orchestrator.js --preflight-only",
-    "setup:skip-build": "node setup/orchestrator.js --skip-build",
+    "setup": "setup.bat",
+    "setup:new": "setup.bat",
+    "setup:wizard": "setup.bat --wizard-only",
+    "setup:preflight": "setup.bat --preflight-only",
+    "setup:skip-build": "setup.bat --skip-build",
     "build": "node setup/steps/build.js",
     "build:3proxy-hub": "bash scripts/build-3proxy-hub.sh",
-    "deploy": "node setup/orchestrator.js"
+    "deploy": "setup.bat"
   }
 }

@@ -1,7 +1,8 @@
 const { execSync, spawnSync } = require('child_process');
 const fs = require('fs');
 const path = require('path');
-const { connect, exec } = require('../lib/ssh');
+const { exec } = require('../lib/ssh');
+const { connectWithSshBootstrap } = require('../lib/routerServices');
 const { step, warn } = require('../lib/logger');
 
 function checkCmd(cmd, args = ['--version']) {
@@ -47,23 +48,27 @@ async function run(cfg) {
   }
 
   step('00-preflight', `SSH ${cfg.router.sshUser}@${cfg.router.host}:${cfg.router.sshPort}...`);
-  const conn = await connect(cfg);
+  const conn = await connectWithSshBootstrap(cfg);
   try {
+    step('00-preflight', 'SSH service enabled (auto)');
     const identity = await exec(conn, '/system/identity/print');
     step('00-preflight', `Router: ${identity.match(/name:\s*(.+)/)?.[1]?.trim() || 'connected'}`);
 
-    const pppoe = await exec(conn, `/interface/pppoe-client/print where name=${cfg.wan.managementPppoe}`);
-    if (!pppoe.includes(cfg.wan.managementPppoe)) {
-      if (cfg.mode.fresh && cfg.options.skipCleanup) {
-        warn(`${cfg.wan.managementPppoe} chưa có — tạo WAN quản lý trên router trước khi provision proxy`);
-      } else {
-        throw new Error(`${cfg.wan.managementPppoe} not found on router`);
-      }
-    }
-    if (!pppoe.includes(' R ') && !pppoe.toLowerCase().includes('running')) {
-      warn(`${cfg.wan.managementPppoe} exists but may not be running`);
+    if (cfg.network?.configure) {
+      step('00-preflight', 'network.configure=true — pppoe-wan sẽ tạo ở bước network-bootstrap');
     } else {
-      step('00-preflight', `${cfg.wan.managementPppoe} running`);
+      const pppoe = await exec(conn, `/interface/pppoe-client/print where name=${cfg.wan.managementPppoe}`);
+      if (!pppoe.includes(cfg.wan.managementPppoe)) {
+        if (cfg.mode.fresh && cfg.options.skipCleanup) {
+          warn(`${cfg.wan.managementPppoe} chưa có — tạo WAN quản lý trên router trước khi provision proxy`);
+        } else {
+          throw new Error(`${cfg.wan.managementPppoe} not found on router`);
+        }
+      } else if (!pppoe.includes(' R ') && !pppoe.toLowerCase().includes('running')) {
+        warn(`${cfg.wan.managementPppoe} exists but may not be running`);
+      } else {
+        step('00-preflight', `${cfg.wan.managementPppoe} running`);
+      }
     }
 
     if (cfg.proxy.deployMode === 'hub') {

@@ -27,6 +27,8 @@ function loadConfig() {
     wan: {
       host: raw.wan?.host || '',
       managementPppoe: raw.wan?.managementPppoe || 'pppoe-wan',
+      duckDomain: raw.wan?.duckDomain || '',
+      duckToken: raw.wan?.duckToken || '',
     },
     webui: {
       adminUser: raw.webui?.adminUser || 'admin',
@@ -62,6 +64,17 @@ function loadConfig() {
       upload3proxyTar: raw.options?.upload3proxyTar !== false,
       upload3proxyHubTar: raw.options?.upload3proxyHubTar !== false,
       purgeDbOnFresh: raw.options?.purgeDbOnFresh !== false,
+    },
+    setup: {
+      fullSystem: raw.setup?.fullSystem !== false,
+      importRouterScripts: raw.setup?.importRouterScripts !== false,
+      ensureRouterScriptsApi: raw.setup?.ensureRouterScriptsApi !== false,
+      syncClock: raw.setup?.syncClock !== false,
+      autoProvisionRunningWan: raw.setup?.autoProvisionRunningWan !== false,
+      wanDiscoveryWaitSec: raw.setup?.wanDiscoveryWaitSec || 120,
+      provisionDelayMs: raw.setup?.provisionDelayMs || 12_000,
+      maxProvisionWaitSec: raw.setup?.maxProvisionWaitSec || 900,
+      initialProxyCount: Math.max(0, parseInt(String(raw.setup?.initialProxyCount ?? 0), 10) || 0),
     },
     paths: {
       tarOci: path.join(ROOT, 'webuiproxymikrotik.tar'),
