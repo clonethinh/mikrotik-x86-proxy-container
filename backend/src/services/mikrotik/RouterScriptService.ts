@@ -9,7 +9,7 @@ export const MANAGED_ROUTER_SCRIPTS = [
     description: 'Kiểm tra IP pool pppoe-out1..N, quay số khi IP xấu/mất net. Bỏ qua pppoe-wan.',
     rsc: 'disk1/webuiproxymikrotik/quayip.rsc',
     schedulerNames: ['quayip-scheduler', 'schedule1'],
-    defaultInterval: '10m',
+    defaultInterval: '5m',
     longRunning: true,
   },
   {
@@ -58,6 +58,34 @@ export interface RouterScriptStatus {
   } | null;
 }
 
+export interface RouterScriptIpChange {
+  pppoeName: string;
+  before: string | null;
+  after: string | null;
+}
+
+export interface RouterScriptInstallChange {
+  name: ManagedRouterScriptName;
+  label: string;
+  wasInstalled: boolean;
+  nowInstalled: boolean;
+  runCountBefore: number;
+  runCountAfter: number;
+}
+
+export interface RouterScriptActionResult {
+  ok: boolean;
+  action: 'ensure' | 'run';
+  script?: ManagedRouterScriptName;
+  durationMs: number;
+  summary: string;
+  outputLines: string[];
+  logLines: string[];
+  installChanges: RouterScriptInstallChange[];
+  ipChanges: RouterScriptIpChange[];
+  at: string;
+}
+
 function normalizeRos(text: string): string {
   return text.replace(/\r/g, '');
 }
@@ -91,6 +119,90 @@ function entryDisabled(out: string, name: string): boolean {
 function parseNextRun(chunk: string): string | null {
   const m = normalizeRos(chunk).match(/next-run=([0-9-]+ [0-9:]+)/);
   return m?.[1] || null;
+}
+
+/** Lọc dòng SSH/RouterOS có nội dung hữu ích cho UI. */
+function isRosNoiseLine(line: string): boolean {
+  return /sshd failed|ssh-cmd:|no such item|\/container\/shell|syntax error|please check it manually/i.test(line);
+}
+
+function parseOutputLines(text: string): string[] {
+  const skip = /^(Flags:|Columns:|\d+\s|$)/;
+  return normalizeRos(text)
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && !skip.test(l) && !isRosNoiseLine(l));
+}
+
+function parseLogLines(text: string): string[] {
+  return normalizeRos(text)
+    .split('\n')
+    .map(l => l.trim())
+    .filter(l => l.length > 0 && !l.startsWith('Flags:') && !l.startsWith('Columns:') && !isRosNoiseLine(l))
+    .slice(-40);
+}
+
+function diffInstallChanges(
+  before: RouterScriptStatus[],
+  after: RouterScriptStatus[],
+): RouterScriptInstallChange[] {
+  const beforeMap = new Map(before.map(s => [s.name, s]));
+  return after.map(s => {
+    const prev = beforeMap.get(s.name);
+    return {
+      name: s.name,
+      label: s.label,
+      wasInstalled: prev?.installed ?? false,
+      nowInstalled: s.installed,
+      runCountBefore: prev?.runCount ?? 0,
+      runCountAfter: s.runCount,
+    };
+  }).filter(c => !c.wasInstalled && c.nowInstalled
+    || c.wasInstalled !== c.nowInstalled
+    || c.runCountAfter !== c.runCountBefore);
+}
+
+function diffIpChanges(
+  before: Map<string, string | null>,
+  after: Map<string, string | null>,
+): RouterScriptIpChange[] {
+  const changes: RouterScriptIpChange[] = [];
+  for (const [pppoeName, afterIp] of after) {
+    const beforeIp = before.get(pppoeName) ?? null;
+    if (beforeIp !== afterIp) {
+      changes.push({ pppoeName, before: beforeIp, after: afterIp });
+    }
+  }
+  return changes.sort((a, b) => a.pppoeName.localeCompare(b.pppoeName));
+}
+
+function buildEnsureSummary(
+  outputLines: string[],
+  installChanges: RouterScriptInstallChange[],
+): string {
+  const newly = installChanges.filter(c => !c.wasInstalled && c.nowInstalled).length;
+  const steps = outputLines.filter(l => l.includes('[router-scripts]') || l.includes('DONE') || l.includes(':')).length;
+  if (newly > 0) return `Cài mới ${newly} script · ${steps || outputLines.length} bước import`;
+  if (outputLines.some(l => l.includes('DONE'))) return `Đã cập nhật script trên router · ${steps || outputLines.length} bước`;
+  return `Import xong · ${outputLines.length} dòng output`;
+}
+
+function buildRunSummary(
+  name: ManagedRouterScriptName,
+  meta: (typeof MANAGED_ROUTER_SCRIPTS)[number],
+  ipChanges: RouterScriptIpChange[],
+  logLines: string[],
+  runCountDelta: number,
+): string {
+  if (name === 'quayip') {
+    const rotated = ipChanges.filter(c => c.before !== c.after && c.after).length;
+    const dead = logLines.filter(l => /DISABLED|bi TAT|TAT/.test(l)).length;
+    if (rotated > 0) return `Quay IP: ${rotated} WAN đổi IP${dead > 0 ? ` · ${dead} WAN tắt` : ''}`;
+    if (ipChanges.length > 0) return `Quay IP: kiểm tra ${ipChanges.length} WAN · không đổi IP`;
+    return 'Quay IP xong — xem log chi tiết bên dưới';
+  }
+  if (runCountDelta > 0) return `${meta.label}: chạy xong (run +${runCountDelta})`;
+  return `${meta.label}: chạy xong`;
 }
 
 /** Script metadata (run-count, last-started) sits on lines before source=. */
@@ -158,19 +270,82 @@ export class RouterScriptService {
     return Promise.all(MANAGED_ROUTER_SCRIPTS.map(s => this.getStatus(s.name)));
   }
 
-  async run(name: ManagedRouterScriptName): Promise<{ ok: boolean; message: string }> {
+  private async snapshotPppoeIps(): Promise<Map<string, string | null>> {
+    const mik = getMikrotikService();
+    const pppoes = await mik.getPppoeInterfaces().catch(() => []);
+    const map = new Map<string, string | null>();
+    for (const p of pppoes) {
+      if (p.name.startsWith('pppoe-out')) map.set(p.name, p.publicIp || null);
+    }
+    return map;
+  }
+
+  private async fetchRecentScriptLogs(scriptName: string): Promise<string[]> {
+    const mik = getMikrotikService();
+    const where = scriptName === 'quayip'
+      ? 'message~"quayip" || message~"KETQUA" || message~"BAO CAO"'
+      : `message~"${scriptName}"`;
+    const out = await mik.sshExec(`/log print where (${where})`, 12_000).catch(() => '');
+    return parseLogLines(out).slice(-25);
+  }
+
+  async run(name: ManagedRouterScriptName): Promise<RouterScriptActionResult> {
     const meta = this.meta(name);
     const mik = getMikrotikService();
     const timeout = meta.longRunning ? 600_000 : 60_000;
+    const t0 = Date.now();
     logger.info({ script: name }, 'RouterScriptService.run');
-    await mik.sshExec(`/system script run ${name}`, timeout);
-    return { ok: true, message: `Đã chạy ${meta.label}` };
+
+    const beforeStatus = await this.getStatus(name);
+    const beforeIps = meta.longRunning ? await this.snapshotPppoeIps() : new Map<string, string | null>();
+
+    const raw = await mik.sshExec(`/system script run ${name}`, timeout);
+    const outputLines = parseOutputLines(raw);
+
+    if (meta.longRunning) await new Promise(r => setTimeout(r, 1500));
+
+    const afterStatus = await this.getStatus(name);
+    const afterIps = meta.longRunning ? await this.snapshotPppoeIps() : beforeIps;
+    const ipChanges = meta.longRunning ? diffIpChanges(beforeIps, afterIps) : [];
+    const logLines = await this.fetchRecentScriptLogs(name);
+    const runCountDelta = afterStatus.runCount - beforeStatus.runCount;
+
+    const summary = buildRunSummary(name, meta, ipChanges, logLines, runCountDelta);
+    return {
+      ok: true,
+      action: 'run',
+      script: name,
+      durationMs: Date.now() - t0,
+      summary,
+      outputLines,
+      logLines,
+      installChanges: [],
+      ipChanges,
+      at: new Date().toISOString(),
+    };
   }
 
-  async ensureInstalled(): Promise<void> {
+  async ensureInstalled(): Promise<RouterScriptActionResult> {
     const mik = getMikrotikService();
+    const t0 = Date.now();
     logger.info('RouterScriptService.ensureInstalled');
-    await mik.sshImportRsc('disk1/webuiproxymikrotik/ensure-router-scripts.rsc', 120_000);
+    const before = await this.listStatus();
+    const raw = await mik.sshImportRsc('disk1/webuiproxymikrotik/ensure-router-scripts.rsc', 120_000);
+    const after = await this.listStatus();
+    const outputLines = parseOutputLines(raw);
+    const installChanges = diffInstallChanges(before, after);
+    const summary = buildEnsureSummary(outputLines, installChanges);
+    return {
+      ok: true,
+      action: 'ensure',
+      durationMs: Date.now() - t0,
+      summary,
+      outputLines,
+      logLines: [],
+      installChanges,
+      ipChanges: [],
+      at: new Date().toISOString(),
+    };
   }
 }
 

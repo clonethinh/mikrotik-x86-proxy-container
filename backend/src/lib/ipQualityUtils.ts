@@ -31,6 +31,11 @@ export function isBadWanIp(ip: string | null | undefined, rejectPrivate = false)
   return !info.usable;
 }
 
+/** IP WAN dùng được cho proxy (public, có thể ra internet). */
+export function isUsableWanIp(ip: string | null | undefined): ip is string {
+  return !!ip && !isBadWanIp(ip);
+}
+
 export function classifyPublicIp(
   ip: string | null | undefined,
   rejectPrivate = false,

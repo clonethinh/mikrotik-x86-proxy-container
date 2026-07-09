@@ -134,10 +134,7 @@ async function setHubContainerTime(shardId: number, d: Date): Promise<void> {
   const ctn = hubContainerName(shardId);
   const epoch = Math.floor(d.getTime() / 1000);
   const mik = getMikrotikService();
-  await mik.sshExec(
-    `/container/shell ${ctn} cmd="/bin/sh -c '${shellQuote(`date -s @${epoch}`)}'"`,
-    12_000,
-  );
+  await mik.containerShell(ctn, `date -s @${epoch}`, 12_000);
 }
 
 async function hubContainerExists(name: string): Promise<boolean> {
@@ -232,10 +229,7 @@ async function hubShellDate(shardId: number): Promise<string> {
   const ctn = hubContainerName(shardId);
   if (!(await hubContainerExists(ctn))) return '';
   const mik = getMikrotikService();
-  const out = await mik.sshExec(
-    `/container/shell ${ctn} cmd="/bin/sh -c 'date -Is'"`,
-    10_000,
-  );
+  const out = await mik.containerShell(ctn, 'date -Is', 10_000);
   return out.trim().split('\n').pop()?.trim() || '';
 }
 

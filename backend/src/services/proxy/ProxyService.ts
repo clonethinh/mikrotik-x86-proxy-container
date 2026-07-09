@@ -33,6 +33,7 @@ import { hubProxyService } from './HubProxyService';
 import { hubRateLimitService } from './HubRateLimitService';
 import { syncHubConfig } from './HubConfigService';
 import { resolveProxyEgress } from '../../lib/proxyEgressUtils';
+import { isUsableWanIp } from '../../lib/ipQualityUtils';
 import { z } from 'zod';
 
 const MAX_PPPOE_IDX = maxPppoeIdx();
@@ -589,7 +590,7 @@ class ProxyService {
       if (newIp === 'TIMEOUT') {
         throw new Error('PPPoE reconnect timeout - không lấy được IP mới');
       }
-      if (!newIp || newIp.startsWith('169.254.')) {
+      if (!isUsableWanIp(newIp)) {
         throw new Error(`PPPoE ${reloadIf} nhận IP không hợp lệ (${newIp || 'none'})`);
       }
 
@@ -658,7 +659,7 @@ class ProxyService {
 
     const egress = proxy.egressPppoeName || proxy.pppoeName || `pppoe-out${proxy.pppoeIdx}`;
     const exitIp = proxy.publicIp;
-    if (!exitIp || exitIp.startsWith('169.254.')) {
+    if (!isUsableWanIp(exitIp)) {
       const err = `WAN IP không hợp lệ (${exitIp || 'none'})`;
       if (persist) {
         await prisma.proxyUser.update({
@@ -898,7 +899,7 @@ class ProxyService {
     const pppoe = pppoes.find(p => p.index === proxy.pppoeIdx);
     if (!pppoe) throw new Error(`pppoe-out${proxy.pppoeIdx} không tồn tại trên router`);
     if (!pppoe.running) throw new Error(`pppoe-out${proxy.pppoeIdx} không RUNNING`);
-    if (!pppoe.publicIp || pppoe.publicIp.startsWith('169.254.')) {
+    if (!isUsableWanIp(pppoe.publicIp)) {
       throw new Error(`pppoe-out${proxy.pppoeIdx} chưa có IP public hợp lệ (${pppoe.publicIp || 'none'}) — không provision để tránh ảnh hưởng WAN khác`);
     }
 
@@ -1094,7 +1095,7 @@ class ProxyService {
     const pppoes = await mik.getPppoeInterfaces();
     const pppoe = pppoes.find(p => p.index === idx);
     const wanIp = pppoe?.publicIp;
-    if (!wanIp || wanIp.startsWith('169.254.')) {
+    if (!isUsableWanIp(wanIp)) {
       throw new Error(`${ifName} IP không hợp lệ (${wanIp || 'none'})`);
     }
 
@@ -1368,7 +1369,7 @@ class ProxyService {
     // WebUI container cũng không route được tới 172.18.x.x.
     // Tin cậy healthcheck nội bộ của container (portcheck) + IP egress PPPoE.
     const extIp = proxy.publicIp;
-    if (!extIp || extIp.startsWith('169.254.')) {
+    if (!isUsableWanIp(extIp)) {
       return { ok: false, exitIp: null, error: `WAN IP không hợp lệ (${extIp || 'none'})` };
     }
 

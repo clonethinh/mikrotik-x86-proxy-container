@@ -7,10 +7,7 @@ import { config } from '../../lib/config';
 import { logger } from '../../lib/logger';
 import { resolveProxyEgress } from '../../lib/proxyEgressUtils';
 import { isHubMode } from '../../lib/hubUtils';
-
-function isValidWanIp(ip: string | null | undefined): ip is string {
-  return !!ip && !ip.startsWith('169.254.');
-}
+import { isUsableWanIp } from '../../lib/ipQualityUtils';
 
 let timer: NodeJS.Timeout | null = null;
 let running = false;
@@ -49,7 +46,7 @@ async function syncWan(): Promise<void> {
       const proxies = await prisma.proxyUser.findMany({ where: { enabled: true } });
       for (const proxy of proxies) {
         if (resolveProxyEgress(proxy) !== p.name) continue;
-        if (!isValidWanIp(p.publicIp)) continue;
+        if (!isUsableWanIp(p.publicIp)) continue;
         if (proxy.publicIp === p.publicIp) continue;
         await prisma.ipHistory.create({
           data: { proxyId: proxy.id, oldIp: proxy.publicIp, newIp: p.publicIp, source: 'sync' },

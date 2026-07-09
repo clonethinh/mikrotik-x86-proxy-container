@@ -202,10 +202,13 @@ export default async function systemRoutes(app: FastifyInstance) {
     const u = req.user as any;
     if (u.role !== 'admin') return reply.code(403).send({ error: 'admin only' });
     try {
-      await getRouterScriptService().ensureInstalled();
+      const result = await getRouterScriptService().ensureInstalled();
       const scripts = await getRouterScriptService().listStatus();
-      await audit({ userId: u.uid, username: u.username, action: 'router-scripts-ensure', ip: req.ip });
-      return { ok: true, scripts };
+      await audit({
+        userId: u.uid, username: u.username, action: 'router-scripts-ensure', ip: req.ip,
+        details: { summary: result.summary, steps: result.outputLines.length },
+      });
+      return { ...result, scripts };
     } catch (e: any) {
       return reply.code(400).send({ error: e.message });
     }
@@ -223,7 +226,10 @@ export default async function systemRoutes(app: FastifyInstance) {
       }
       try {
         const result = await getRouterScriptService().run(name);
-        await audit({ userId: u.uid, username: u.username, action: 'router-script-run', ip: req.ip, details: { name } });
+        await audit({
+          userId: u.uid, username: u.username, action: 'router-script-run', ip: req.ip,
+          details: { name, summary: result.summary, ipChanges: result.ipChanges.length },
+        });
         const scripts = await getRouterScriptService().listStatus();
         return { ...result, scripts };
       } catch (e: any) {

@@ -211,12 +211,22 @@ async function verify() {
   if (!dash.live || !dash.wanTraffic) throw new Error('dashboard realtime fields missing after deploy');
 }
 
+async function postDeployBootstrap() {
+  if (process.env.SKIP_POST_DEPLOY === '1') {
+    log('post-deploy', 'SKIP_POST_DEPLOY=1');
+    return;
+  }
+  log('post-deploy', 'Sync mikrotik/*.rsc + router-scripts ensure...');
+  execSync('node scripts/post-deploy-bootstrap.js', { cwd: ROOT, stdio: 'inherit' });
+}
+
 async function main() {
   ensureTar(process.env.FORCE_BUILD === '1');
   if (sshOk()) {
     log('ssh', `OK — running deploy.sh on port ${SSH_PORT}`);
     execSync(`SSH_PORT=${SSH_PORT} MIK_PASS=${PASS} ./scripts/deploy.sh`, { cwd: ROOT, stdio: 'inherit' });
     await verify();
+    await postDeployBootstrap();
     return;
   }
   log('ssh', `Port ${SSH_PORT} unreachable — trying WebUI internal redeploy API`);
@@ -227,6 +237,7 @@ async function main() {
   try {
     await deployViaWebuiApi(tunnelUrl || undefined);
     await verify();
+    await postDeployBootstrap();
     return;
   } catch (e) {
     log('webui', `Skip: ${e.message}`);
@@ -236,6 +247,7 @@ async function main() {
   await deployViaRestWithUrl(tunnelUrl);
   if (tunnelChild) try { tunnelChild.kill(); } catch { /* ignore */ }
   await verify();
+  await postDeployBootstrap();
   console.log('\n=== DEPLOY AUTO OK ===');
 }
 

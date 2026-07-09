@@ -55,7 +55,7 @@ function buildEnv(): string {
     `MIKROTIK_WAN_HOST=${mik.wanHost || ''}`, 'JWT_SECRET=' + config.jwtSecret,
     `ADMIN_USERNAME=${process.env.ADMIN_USERNAME || 'admin'}`, `ADMIN_PASSWORD=${process.env.ADMIN_PASSWORD || 'admin123'}`,
     'DATABASE_URL=file:/data/proxy.db', 'PROXY_DEPLOY_MODE=hub', 'LOW_CPU_MODE=true', 'ENABLE_REALTIME=true',
-    'MIKROTIK_REST_CACHE_MS=8000', 'AUTO_PROXY_POLL_MS=45000', 'LOG_LEVEL=warn',
+    'MIKROTIK_REST_CACHE_MS=10000', 'AUTO_PROXY_POLL_MS=15000', 'LOG_LEVEL=warn',
   ].filter(Boolean).join(',');
 }
 

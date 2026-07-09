@@ -145,10 +145,7 @@ async function fetchAdminXmlViaHubShell(
   const ctn = hubContainerName(shardId);
   const mik = getMikrotikService();
   const inner = `wget -qO- http://${HUB_MONITOR_USERNAME}:${pass}@${host}:${port}${path} 2>/dev/null`;
-  const out = await mik.sshExec(
-    `/container/shell ${ctn} cmd="/bin/sh -c '${inner.replace(/'/g, "'\\''")}'"`,
-    timeoutMs,
-  );
+  const out = await mik.containerShell(ctn, inner, timeoutMs);
   if (!out || out.length < 20) {
     throw new Error(`hub shell admin empty (${out?.slice(0, 60) || 'no output'})`);
   }

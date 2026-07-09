@@ -185,7 +185,8 @@ export const config = {
     /** Tự apply rate-limit firewall sau tạo/sửa proxy — tắt bằng HUB_RATE_LIMIT_ON_APPLY=false */
     rateLimitOnApply: process.env.HUB_RATE_LIMIT_ON_APPLY !== 'false',
     rateLimitDebounceMs: parseInt(
-      process.env.HUB_RATE_LIMIT_DEBOUNCE_MS || process.env.HUB_RELOAD_DEBOUNCE_MS || '2500',
+      process.env.HUB_RATE_LIMIT_DEBOUNCE_MS
+        || (process.env.LOW_CPU_MODE === 'true' ? '15000' : process.env.HUB_RELOAD_DEBOUNCE_MS || '2500'),
       10,
     ),
   },
@@ -206,7 +207,7 @@ export const config = {
   autoProxy: {
     mode: (process.env.AUTO_PROXY_MODE || 'semi') as 'off' | 'semi' | 'full',
     pollIntervalMs: parseInt(
-      process.env.AUTO_PROXY_POLL_MS || (process.env.LOW_CPU_MODE === 'true' ? '45000' : '20000'),
+      process.env.AUTO_PROXY_POLL_MS || (process.env.LOW_CPU_MODE === 'true' ? '30000' : '20000'),
       10,
     ),
     countdownMs: parseInt(process.env.AUTO_PROXY_COUNTDOWN_MS || '8000', 10),

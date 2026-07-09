@@ -10,7 +10,7 @@ import {
 } from '@ant-design/icons';
 import {
   api, AutoProxySettings, ClockSyncResult, FirewallReconcileResult, FirewallReconcileStatus,
-  MikrotikTestResult, RouterScriptStatus,
+  MikrotikTestResult, RouterScriptActionResult, RouterScriptStatus,
 } from '../services/api';
 import { useAuth } from '../services/auth';
 
@@ -38,6 +38,7 @@ export default function SettingsPage() {
   const [scriptsLoading, setScriptsLoading] = useState(false);
   const [ensuringScripts, setEnsuringScripts] = useState(false);
   const [runningScript, setRunningScript] = useState<string | null>(null);
+  const [routerScriptLastResult, setRouterScriptLastResult] = useState<RouterScriptActionResult | null>(null);
   const [fwReconcile, setFwReconcile] = useState<FirewallReconcileStatus | null>(null);
   const [fwLoading, setFwLoading] = useState(false);
   const [fwRunning, setFwRunning] = useState(false);
@@ -105,9 +106,10 @@ export default function SettingsPage() {
   const ensureRouterScripts = async () => {
     setEnsuringScripts(true);
     try {
-      const r = await api.post<{ ok: boolean; scripts: RouterScriptStatus[] }>('/api/system/router-scripts/ensure');
+      const r = await api.post<RouterScriptActionResult>('/api/system/router-scripts/ensure');
       setRouterScripts(r.scripts || []);
-      message.success('Đã cài đặt/cập nhật script trên router');
+      setRouterScriptLastResult(r);
+      message.success(r.summary || 'Đã cài đặt/cập nhật script trên router');
     } catch (e: any) { message.error(e.message); }
     finally { setEnsuringScripts(false); }
   };
@@ -116,10 +118,11 @@ export default function SettingsPage() {
     setRunningScript(name);
     try {
       message.loading({ content: `Đang chạy ${name}…`, key: 'run-script', duration: 0 });
-      const r = await api.post<{ ok: boolean; scripts: RouterScriptStatus[] }>(`/api/system/router-scripts/${name}/run`);
+      const r = await api.post<RouterScriptActionResult>(`/api/system/router-scripts/${name}/run`);
       setRouterScripts(r.scripts || []);
+      setRouterScriptLastResult(r);
       message.destroy('run-script');
-      message.success(name === 'quayip' ? 'Quay IP xong — xem WAN Status' : `Đã chạy ${name}`);
+      message.success(r.summary || `Đã chạy ${name}`);
     } catch (e: any) {
       message.destroy('run-script');
       message.error(e.message);
@@ -417,6 +420,52 @@ export default function SettingsPage() {
                 )},
             ]}
           />
+          {routerScriptLastResult && (
+            <div style={{ marginTop: 12 }}>
+              <Descriptions column={{ xs: 1, sm: 2 }} bordered size="small" style={{ marginBottom: 12 }}>
+                <Descriptions.Item label="Lần chạy cuối">
+                  {new Date(routerScriptLastResult.at).toLocaleString('vi-VN')} ({routerScriptLastResult.durationMs}ms)
+                </Descriptions.Item>
+                <Descriptions.Item label="Hành động">
+                  {routerScriptLastResult.action === 'ensure' ? 'Cài đặt script' : `Chạy ${routerScriptLastResult.script || '—'}`}
+                </Descriptions.Item>
+                <Descriptions.Item label="Tóm tắt" span={2}>
+                  {routerScriptLastResult.summary}
+                </Descriptions.Item>
+                {routerScriptLastResult.installChanges.length > 0 && (
+                  <Descriptions.Item label="Script thay đổi" span={2}>
+                    {routerScriptLastResult.installChanges.map(c => (
+                      <Tag key={c.name} bordered={false} color={c.nowInstalled ? 'success' : 'default'} style={{ marginBottom: 4 }}>
+                        {c.label}: {c.wasInstalled ? 'có' : 'thiếu'} → {c.nowInstalled ? 'OK' : 'thiếu'}
+                      </Tag>
+                    ))}
+                  </Descriptions.Item>
+                )}
+                {routerScriptLastResult.ipChanges.length > 0 && (
+                  <Descriptions.Item label="IP đổi" span={2}>
+                    {routerScriptLastResult.ipChanges.slice(0, 8).map(c => (
+                      <div key={c.pppoeName} style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                        {c.pppoeName}: {c.before || '—'} → {c.after || '—'}
+                      </div>
+                    ))}
+                    {routerScriptLastResult.ipChanges.length > 8 && (
+                      <Text type="secondary" style={{ fontSize: 11 }}>
+                        +{routerScriptLastResult.ipChanges.length - 8} WAN khác
+                      </Text>
+                    )}
+                  </Descriptions.Item>
+                )}
+              </Descriptions>
+              {(routerScriptLastResult.outputLines.length > 0 || routerScriptLastResult.logLines.length > 0) && (
+                <pre style={{
+                  margin: 0, padding: 10, fontSize: 11, maxHeight: 180, overflow: 'auto',
+                  background: 'rgba(0,0,0,0.04)', borderRadius: 6,
+                }}>
+                  {[...routerScriptLastResult.outputLines, ...routerScriptLastResult.logLines].join('\n')}
+                </pre>
+              )}
+            </div>
+          )}
         </SettingsSectionCard>
       )}
 

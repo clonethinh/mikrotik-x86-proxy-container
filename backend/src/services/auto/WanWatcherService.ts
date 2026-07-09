@@ -11,19 +11,12 @@ import { hubProxyService } from '../proxy/HubProxyService';
 import { isHubMode } from '../../lib/hubUtils';
 import { clearWanProbeCache, probeWanInternet } from '../wan/WanInternetProbe';
 import { resolveProxyEgress } from '../../lib/proxyEgressUtils';
+import { isBadWanIp, isUsableWanIp } from '../../lib/ipQualityUtils';
 import { reallocateProxiesOnWanDisable } from '../proxy/PoolAllocator';
 
 type Snapshot = Map<string, { running: boolean; publicIp: string | null; idx: number }>;
 
-function isValidWanIp(ip: string | null | undefined): ip is string {
-  return !!ip && !ip.startsWith('169.254.');
-}
-
-function isBadWanIp(ip: string | null | undefined): ip is string {
-  return !!ip && ip.startsWith('169.254.');
-}
-
-/** WAN egress nhận IP xấu (169.254 / mất IP) — đánh dấu pending rồi thử đổi egress pool. */
+/** WAN egress nhận IP xấu (169.254 / CGNAT / mất IP) — đánh dấu pending rồi thử đổi egress pool. */
 async function handleBadEgressIp(egressName: string, badIp: string | null): Promise<void> {
   if (!isHubMode()) return;
   const proxies = await prisma.proxyUser.findMany({ where: { enabled: true } });
@@ -49,7 +42,7 @@ async function handleBadEgressIp(egressName: string, badIp: string | null): Prom
 
 /** Tất cả proxy dùng egressName làm WAN ra — gọi khi IP của interface đó đổi. */
 async function tryFinalizeEgressIpChange(egressName: string, publicIp: string): Promise<void> {
-  if (!isHubMode() || !isValidWanIp(publicIp)) return;
+  if (!isHubMode() || !isUsableWanIp(publicIp)) return;
   const proxies = await prisma.proxyUser.findMany({ where: { enabled: true } });
   for (const proxy of proxies) {
     if (resolveProxyEgress(proxy) !== egressName) continue;
@@ -59,7 +52,7 @@ async function tryFinalizeEgressIpChange(egressName: string, publicIp: string): 
 
 /** Khi IP egress WAN lên — patch NAT slot (chỉ khi proxy slot dùng đúng egress). */
 async function tryFinalizeSlotProxy(pppoeIdx: number, egressName: string, publicIp: string) {
-  if (!isHubMode() || !isValidWanIp(publicIp)) return;
+  if (!isHubMode() || !isUsableWanIp(publicIp)) return;
   const proxy = await prisma.proxyUser.findUnique({ where: { pppoeIdx } });
   if (!proxy?.enabled) return;
 
@@ -68,7 +61,7 @@ async function tryFinalizeSlotProxy(pppoeIdx: number, egressName: string, public
 
   const needsFinalize = proxy.status === 'pending'
     || !proxy.publicIp
-    || proxy.publicIp.startsWith('169.254.')
+    || isBadWanIp(proxy.publicIp)
     || proxy.publicIp !== publicIp;
 
   if (!needsFinalize) return;
@@ -252,17 +245,17 @@ async function tick() {
             type: 'wan.ip-changed',
             payload: { pppoeName: name, pppoeIdx: cur.idx, oldIp: prev.publicIp, newIp: cur.publicIp },
           });
-          if (isValidWanIp(cur.publicIp)) {
+          if (isUsableWanIp(cur.publicIp)) {
             void tryFinalizeEgressIpChange(name, cur.publicIp);
           } else if (isBadWanIp(cur.publicIp)) {
             void handleBadEgressIp(name, cur.publicIp);
           }
         } else if (isBadWanIp(cur.publicIp) && cur.running) {
           void handleBadEgressIp(name, cur.publicIp);
-        } else if (isValidWanIp(cur.publicIp) && (!prev.publicIp || !isValidWanIp(prev.publicIp))) {
+        } else if (isUsableWanIp(cur.publicIp) && (!prev.publicIp || isBadWanIp(prev.publicIp))) {
           clearWanProbeCache(name);
           void tryFinalizeEgressIpChange(name, cur.publicIp);
-        } else if (isValidWanIp(cur.publicIp) && cur.running) {
+        } else if (isUsableWanIp(cur.publicIp) && cur.running) {
           const proxy = await prisma.proxyUser.findUnique({ where: { pppoeIdx: cur.idx } });
           if (proxy?.status === 'pending') {
             void tryFinalizeEgressIpChange(name, cur.publicIp);

@@ -50,6 +50,7 @@ import {
   HUB_TARBALL,
 } from '../../lib/hubUtils';
 import { assertProxyPoolPppoe } from '../../lib/pppoeUtils';
+import { isUsableWanIp } from '../../lib/ipQualityUtils';
 import { getMikrotikService } from '../mikrotik/MikrotikService';
 import { logger } from '../../lib/logger';
 import { syncHubConfig, syncHubConfigForShard } from './HubConfigService';
@@ -225,7 +226,7 @@ export class HubProxyService {
 
   /** Chỉ rule phụ thuộc IP WAN — gọi khi IP lên (WanWatcher), tối thiểu CPU */
   async finalizeHubSlotIp(pppoeIdx: number, egressName: string, wanIp: string): Promise<void> {
-    if (!wanIp || wanIp.startsWith('169.254.')) return;
+    if (!wanIp || !isUsableWanIp(wanIp)) return;
     assertProxyPoolPppoe(egressName);
     const mik = getMikrotikService();
     const script = this.buildHubSlotIpRosScript(pppoeIdx, egressName, wanIp);
@@ -428,10 +429,7 @@ export class HubProxyService {
       'else nohup /bin/3proxy /etc/3proxy/3proxy.cfg >/dev/null 2>&1 & sleep 2; pgrep -x 3proxy >/dev/null && echo OK || echo FAIL; fi',
     ].join(' ');
 
-    const out = await mik.sshExec(
-      `/container/shell ${ctnName} cmd="/bin/sh -c '${reloadCmd.replace(/'/g, "'\\''")}'"`,
-      25_000,
-    ).catch(() => '');
+    const out = await mik.containerShell(ctnName, reloadCmd, 25_000).catch(() => '');
 
     if (!out.includes('OK')) {
       logger.warn({ shardId, out: out.slice(0, 120) }, 'reloadHubShard fallback to restart');
@@ -598,7 +596,7 @@ export class HubProxyService {
     if (wanIp === undefined) {
       wanIp = await mik.peekPppoeIp(egressName);
     }
-    const hasValidIp = !!(wanIp && !wanIp.startsWith('169.254.'));
+    const hasValidIp = isUsableWanIp(wanIp);
 
     if (!hasValidIp && !opts?.allowPendingIp) {
       throw new Error(`${egressName} chưa có IP public hợp lệ`);

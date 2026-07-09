@@ -11,7 +11,7 @@ import { routerQueue } from '../../lib/queue';
 import { isHubMode } from '../../lib/hubUtils';
 import { getMikrotikService } from './MikrotikService';
 import { hubProxyService } from '../proxy/HubProxyService';
-import { hubRateLimitService } from '../proxy/HubRateLimitService';
+
 
 type FirewallChain = 'filter' | 'nat' | 'mangle';
 
@@ -264,7 +264,6 @@ async function repairSlots(
     }
   }
 
-  hubRateLimitService.scheduleApply();
   return stats;
 }
 

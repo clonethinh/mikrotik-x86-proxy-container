@@ -2,11 +2,12 @@
 import { prisma } from '../../db/prisma';
 import { getMikrotikService, type PppoeInterface } from '../mikrotik/MikrotikService';
 import { isManagedPppoeName } from '../../lib/pppoeUtils';
+import { isUsableWanIp } from '../../lib/ipQualityUtils';
 
 export async function listAvailableEgress(): Promise<PppoeInterface[]> {
   const mik = getMikrotikService();
   const all = await mik.getPppoeInterfaces().catch(() => []);
-  return all.filter(p => isManagedPppoeName(p.name) && p.running && p.publicIp && !p.publicIp.startsWith('169.254.'));
+  return all.filter(p => isManagedPppoeName(p.name) && p.running && isUsableWanIp(p.publicIp));
 }
 
 export async function listUsedEgressNames(): Promise<Set<string>> {

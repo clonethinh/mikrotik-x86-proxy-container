@@ -7,7 +7,7 @@
 /system script add dont-require-permissions=no name=quayip owner=admin policy=ftp,reboot,read,write,policy,test,password,sniff,sensitive,romon source={
 
 # =========================================================
-#  PPPoE IP Rotator - ban hoan chinh (co tu hoi sinh)
+#  PPPoE IP Rotator - 5m scheduler, 16 lan quay/phien, CGNAT+169.254
 #  - Ping theo src-address + retry        -> het fail gia
 #  - Tach "IP xau" vs "IP dep mat net"    -> khong vut IP dep
 #  - Nho trang thai qua comment "OK"       -> chay lai khong quay so oan
@@ -16,11 +16,11 @@
 # =========================================================
 
 # ==== Cau hinh ====
-:local maxFail        8       ;# so lan quay so toi da moi phien -> tat han
-:local maxNetFail     4       ;# IP dep nhung mat net: so lan kien nhan truoc khi quay so
-:local maxPass        40      ;# so vong lap toi da (chong lap vo han)
-:local waitSec        12      ;# cho giua cac vong cho PPPoE reconnect
-:local settleSec      8       ;# cho on dinh truoc lan kiem tra dau tien
+:local maxFail        16      ;# so lan quay so toi da moi phien -> tat han (tang phuc hoi)
+:local maxNetFail     3       ;# IP dep nhung mat net: so lan kien nhan truoc khi quay so
+:local maxPass        60      ;# so vong lap toi da (chong lap vo han)
+:local waitSec        8       ;# cho giua cac vong cho PPPoE reconnect (nhanh hon)
+:local settleSec      5       ;# cho on dinh truoc lan kiem tra dau tien
 :local pingCount      3       ;# so goi ping moi host
 :local pingTries      3       ;# so lan thu lai ping truoc khi ket luan mat net
 :local pingHosts      {"8.8.8.8";"1.1.1.1"}
@@ -208,7 +208,7 @@
 
 /system scheduler remove [find name=schedule1]
 /system scheduler remove [find name=quayip-scheduler]
-/system scheduler add name=quayip-scheduler start-time=startup interval=10m \
+/system scheduler add name=quayip-scheduler start-time=startup interval=5m \
     on-event="/system script run quayip" comment=webui-quayip-scheduler
 
-:put "quayip: script + scheduler 10m (pppoe-wan excluded)"
+:put "quayip: script + scheduler 5m (pppoe-wan excluded)"

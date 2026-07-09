@@ -200,6 +200,35 @@ export interface RouterScriptStatus {
   } | null;
 }
 
+export interface RouterScriptIpChange {
+  pppoeName: string;
+  before: string | null;
+  after: string | null;
+}
+
+export interface RouterScriptInstallChange {
+  name: string;
+  label: string;
+  wasInstalled: boolean;
+  nowInstalled: boolean;
+  runCountBefore: number;
+  runCountAfter: number;
+}
+
+export interface RouterScriptActionResult {
+  ok: boolean;
+  action: 'ensure' | 'run';
+  script?: string;
+  durationMs: number;
+  summary: string;
+  outputLines: string[];
+  logLines: string[];
+  installChanges: RouterScriptInstallChange[];
+  ipChanges: RouterScriptIpChange[];
+  at: string;
+  scripts?: RouterScriptStatus[];
+}
+
 export interface FirewallReconcileStatus {
   enabled: boolean;
   intervalMs: number;

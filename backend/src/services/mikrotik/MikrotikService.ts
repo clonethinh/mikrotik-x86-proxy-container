@@ -8,6 +8,7 @@ import { URL } from 'url';
 import { config } from '../../lib/config';
 import { logger } from '../../lib/logger';
 import { isProxyPoolPppoe } from '../../lib/pppoeUtils';
+import { isUsableWanIp } from '../../lib/ipQualityUtils';
 import {
   DEV_MGMT_BYPASS_COMMENT,
   DEV_MGMT_TCP_PORTS,
@@ -286,6 +287,41 @@ export class MikrotikService {
     return this.sshExec(`/import file=${rscName}`, timeoutMs);
   }
 
+  /** Chạy lệnh trong container — bỏ qua nếu container không running (tránh ssh-cmd lỗi). */
+  async containerShell(containerName: string, innerSh: string, timeoutMs = 25_000): Promise<string> {
+    const name = containerName?.trim();
+    if (!name) return '';
+
+    const containers = await this.getContainers({ fresh: true });
+    const ctn = containers.find(c => c.name === name);
+    const st = (ctn?.status || '').toLowerCase();
+    const running = !!ctn && (
+      ctn.healthy === true
+      || ['running', 'r', 'healthy', 'h'].includes(st)
+    );
+    if (!running) {
+      logger.debug({ containerName: name, status: ctn?.status }, 'containerShell skip — not running');
+      return '';
+    }
+
+    const escaped = innerSh.replace(/'/g, "'\\''");
+    const variants = [
+      `/container/shell [find name=${name}] cmd="/bin/sh -c '${escaped}'"`,
+      `/container/shell ${name} cmd="/bin/sh -c '${escaped}'"`,
+    ];
+    for (const rosCmd of variants) {
+      try {
+        const out = await this.sshExec(rosCmd, timeoutMs);
+        if (!/no such item|executing script from sshd failed/i.test(out)) {
+          return out;
+        }
+      } catch {
+        /* try next syntax */
+      }
+    }
+    return '';
+  }
+
   // ============ High-level queries ============
 
   bustRestCache(): void {
@@ -391,7 +427,7 @@ export class MikrotikService {
         );
         // Parse first valid public IP (not link-local)
         const candidates = out.match(/[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}\.[\d]{1,3}/g) || [];
-        const publicIp = candidates.find((ip: string) => !ip.startsWith('169.254.'));
+        const publicIp = candidates.find((ip: string) => isUsableWanIp(ip));
         if (publicIp) {
           // Check running state
           const runningOut = await this.sshExec(
@@ -536,7 +572,7 @@ export class MikrotikService {
       const addrs = await this.restGet(`/rest/ip/address?interface=${ifName}&dynamic=yes`);
       if (Array.isArray(addrs) && addrs.length > 0) {
         const ip = (addrs[0].address || '').split('/')[0];
-        if (ip && !ip.startsWith('169.254.')) return ip;
+        if (isUsableWanIp(ip)) return ip;
       }
     } catch { /* retry in wait loop */ }
     return null;

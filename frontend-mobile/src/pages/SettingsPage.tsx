@@ -3,7 +3,7 @@ import {
   Button, Chip, Input, Label, ListBox, NumberField, Select, TextField, toast,
 } from '@heroui/react';
 import {
-  api, AutoProxySettings, ClockSyncResult, MikrotikTestResult, RouterScriptStatus,
+  api, AutoProxySettings, ClockSyncResult, MikrotikTestResult, RouterScriptActionResult, RouterScriptStatus,
 } from '../services/api';
 import { useAuth } from '../services/auth';
 import { formatDateTime } from '../lib/format';
@@ -45,6 +45,7 @@ export default function SettingsPage() {
   const [scriptsLoading, setScriptsLoading] = useState(false);
   const [ensuringScripts, setEnsuringScripts] = useState(false);
   const [runningScript, setRunningScript] = useState<string | null>(null);
+  const [routerScriptLastResult, setRouterScriptLastResult] = useState<RouterScriptActionResult | null>(null);
   const [loading, setLoading] = useState(true);
 
   const loadRouterScripts = async () => {
@@ -130,9 +131,10 @@ export default function SettingsPage() {
   const ensureRouterScripts = async () => {
     setEnsuringScripts(true);
     try {
-      const r = await api.post<{ scripts: RouterScriptStatus[] }>('/api/system/router-scripts/ensure');
+      const r = await api.post<RouterScriptActionResult>('/api/system/router-scripts/ensure');
       setRouterScripts(r.scripts || []);
-      toast.success('Đã cài script trên router');
+      setRouterScriptLastResult(r);
+      toast.success(r.summary || 'Đã cài script trên router');
     } catch (e) {
       toast.danger(e instanceof Error ? e.message : 'Lỗi');
     } finally {
@@ -143,9 +145,10 @@ export default function SettingsPage() {
   const runRouterScript = async (name: string) => {
     setRunningScript(name);
     try {
-      const r = await api.post<{ scripts: RouterScriptStatus[] }>(`/api/system/router-scripts/${name}/run`);
+      const r = await api.post<RouterScriptActionResult>(`/api/system/router-scripts/${name}/run`);
       setRouterScripts(r.scripts || []);
-      toast.success(name === 'quayip' ? 'Quay IP xong' : `Đã chạy ${name}`);
+      setRouterScriptLastResult(r);
+      toast.success(r.summary || `Đã chạy ${name}`);
     } catch (e) {
       toast.danger(e instanceof Error ? e.message : 'Lỗi');
     } finally {
@@ -301,6 +304,26 @@ export default function SettingsPage() {
                 </ListCard>
               ))}
             </RecordList>
+            {routerScriptLastResult ? (
+              <div className="mt-3 rounded-lg border border-border/60 bg-surface-secondary/40 p-3 text-sm">
+                <p className="font-medium">{routerScriptLastResult.summary}</p>
+                <p className="mt-1 text-xs text-muted">
+                  {new Date(routerScriptLastResult.at).toLocaleString('vi-VN')} · {routerScriptLastResult.durationMs}ms
+                </p>
+                {routerScriptLastResult.ipChanges.length > 0 ? (
+                  <div className="mt-2 space-y-1 font-mono text-xs">
+                    {routerScriptLastResult.ipChanges.slice(0, 5).map((c) => (
+                      <div key={c.pppoeName}>{c.pppoeName}: {c.before || '—'} → {c.after || '—'}</div>
+                    ))}
+                  </div>
+                ) : null}
+                {(routerScriptLastResult.outputLines.length > 0 || routerScriptLastResult.logLines.length > 0) ? (
+                  <pre className="proxy-logs-pre mt-2 max-h-32 text-[10px]">
+                    {[...routerScriptLastResult.outputLines, ...routerScriptLastResult.logLines].join('\n')}
+                  </pre>
+                ) : null}
+              </div>
+            ) : null}
           </CollapsibleSection>
         ) : null}
 
