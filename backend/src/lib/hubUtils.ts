@@ -79,6 +79,15 @@ export function isHubContainerName(name: string): boolean {
   return name === HUB_CONTAINER_NAME || /^proxy3p-hub-\d+$/.test(name);
 }
 
+/** Map running hub container name → shard id (proxy3p-hub → 0, proxy3p-hub-2 → 1). */
+export function hubShardIdFromContainerName(name: string): number | null {
+  if (name === HUB_CONTAINER_NAME) return 0;
+  const m = name.match(/^proxy3p-hub-(\d+)$/);
+  if (!m) return null;
+  const n = parseInt(m[1], 10);
+  return Number.isFinite(n) && n >= 2 ? n - 1 : null;
+}
+
 /** Slot idx (1-based) → bind IP trong subnet shard (172.18.0.2..51, 172.19.0.2..51, …). */
 export function hubSlotIp(idx: number): string {
   assertValidPppoeIdx(idx);

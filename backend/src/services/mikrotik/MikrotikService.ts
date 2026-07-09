@@ -463,7 +463,7 @@ export class MikrotikService {
     if (addOut.includes('failure:')) {
       throw new Error(addOut.trim().slice(0, 200));
     }
-    await this.ensurePoolPppoeIsolation(name);
+    // add command đã set add-default-route=no use-peer-dns=no — không SSH thêm
 
     this.bustRestCache();
     logger.info({ name, idx, template: template.name }, 'createPppoeOut OK');
@@ -498,7 +498,11 @@ export class MikrotikService {
    * Hard guard: pppoe-wan không bao giờ được disable (luồng chính / DuckDNS).
    * Trả về state mới + IP (nếu đang chạy).
    */
-  async setPppoeEnabled(ifName: string, enabled: boolean): Promise<{ name: string; enabled: boolean; running: boolean; publicIp: string | null }> {
+  async setPppoeEnabled(
+    ifName: string,
+    enabled: boolean,
+    opts?: { skipIsolation?: boolean },
+  ): Promise<{ name: string; enabled: boolean; running: boolean; publicIp: string | null }> {
     if (ifName === 'pppoe-wan') {
       if (!enabled) throw new Error('refused: pppoe-wan là luồng chính, không thể tắt');
       // Management WAN — không nằm trong proxy pool (pppoe-out1+)
@@ -507,7 +511,7 @@ export class MikrotikService {
     const me = Array.isArray(pppoes) ? pppoes.find((p: any) => p.name === ifName) : null;
     if (!me) throw new Error(`${ifName} not found`);
 
-    if (enabled) await this.ensurePoolPppoeIsolation(ifName);
+    if (enabled && !opts?.skipIsolation) await this.ensurePoolPppoeIsolation(ifName);
 
     // Use SSH (REST PATCH body handling is unreliable for *.id targets)
     const cmd = enabled

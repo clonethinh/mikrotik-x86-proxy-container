@@ -122,6 +122,7 @@ export interface ProxyUser {
   id: number;
   pppoeIdx: number;
   pppoeName: string;
+  egressPppoeName?: string | null;
   vethName: string;
   vethIp: string;
   proxyType: 'http' | 'socks5' | 'both';
@@ -141,7 +142,10 @@ export interface ProxyUser {
   updatedAt: string;
   ipHistory?: any[];
   healthChecks?: any[];
-
+  ipQuality?: 'public' | 'cgnat' | 'link_local' | 'private' | 'missing' | 'invalid';
+  ipQualityLabel?: string;
+  ipUsable?: boolean;
+  ipQualityHint?: string;
 }
 
 export interface WanInfo {
@@ -175,6 +179,10 @@ export interface WanInfo {
   comment?: string;
   quayipStatus?: 'protected' | 'ok' | 'dead' | 'disabled' | 'rotating' | 'unknown';
   quayipLabel?: string;
+  ipQuality?: 'public' | 'cgnat' | 'link_local' | 'private' | 'missing' | 'invalid';
+  ipQualityLabel?: string;
+  ipUsable?: boolean;
+  ipQualityHint?: string;
 }
 
 export interface RouterScriptStatus {
@@ -190,6 +198,33 @@ export interface RouterScriptStatus {
     nextRun: string | null;
     disabled: boolean;
   } | null;
+}
+
+export interface FirewallReconcileStatus {
+  enabled: boolean;
+  intervalMs: number;
+  maxSlotsPerPass: number;
+  running: boolean;
+  repairOffset: number;
+  lastError: string | null;
+  lastResult: FirewallReconcileResult | null;
+}
+
+export interface FirewallReconcileResult {
+  dryRun: boolean;
+  repair: boolean;
+  durationMs: number;
+  at: string;
+  removed: { filter: number; nat: number; mangle: number; addressList: number };
+  repaired: { attempted: number; ok: number; failed: number };
+  audit: {
+    totals: { filter: number; nat: number; mangle: number };
+    hubRules: { filter: number; nat: number; mangle: number };
+    duplicates: { chain: string; comment: string; count: number }[];
+    orphans: { chain: string; comment: string; slot: number }[];
+    missing: { pppoeIdx: number; egress: string; comments: string[] }[];
+    staleHubWan: { pppoe: string; address: string; id: string }[];
+  };
 }
 
 export interface AutoProxySettings {

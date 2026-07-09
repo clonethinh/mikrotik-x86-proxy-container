@@ -10,13 +10,24 @@ import { realtimeHub } from '../realtime/hub';
 import { randomPassword, usernameSchema, passwordSchema } from '../lib/validation';
 import { z } from 'zod';
 import { logger } from '../lib/logger';
+import { classifyPublicIp } from '../lib/ipQualityUtils';
 
 export default async function proxyRoutes(app: FastifyInstance) {
   // List
   app.get('/api/proxies', { preHandler: [app.authenticate] }, async (req) => {
     const q = req.query as { search?: string; status?: string };
     const data = await proxyService.list({ search: q.search, status: q.status });
-    return data.map(p => ({ ...p, password: undefined })); // hide password by default
+    return data.map((p) => {
+      const ipInfo = classifyPublicIp(p.publicIp);
+      return {
+        ...p,
+        password: undefined,
+        ipQuality: ipInfo.quality,
+        ipQualityLabel: ipInfo.label,
+        ipUsable: ipInfo.usable,
+        ipQualityHint: ipInfo.hint,
+      };
+    });
   });
 
   // Get one

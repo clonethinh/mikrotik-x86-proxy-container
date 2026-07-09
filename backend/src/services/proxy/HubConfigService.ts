@@ -281,6 +281,26 @@ export async function listActiveHubShardIds(): Promise<number[]> {
   return [...ids].sort((a, b) => a - b);
 }
 
+/** Shards có proxy enabled VÀ hub container đang chạy — tránh /container/shell lỗi "no such item". */
+export async function listTailableHubShardIds(): Promise<number[]> {
+  const { getMikrotikService } = await import('../mikrotik/MikrotikService');
+  const { hubShardIdFromContainerName } = await import('../../lib/hubUtils');
+  const active = new Set(await listActiveHubShardIds());
+  if (!active.size) return [];
+
+  const running = new Set<number>();
+  const containers = await getMikrotikService().getContainers({ fresh: true }).catch(() => []);
+  for (const c of containers) {
+    const up = c.healthy === true
+      || String((c as { running?: string | boolean }).running) === 'true'
+      || ['running', 'healthy'].includes(String(c.status || '').toLowerCase());
+    if (!up) continue;
+    const sid = hubShardIdFromContainerName(c.name);
+    if (sid != null) running.add(sid);
+  }
+  return [...active].filter((sid) => running.has(sid)).sort((a, b) => a - b);
+}
+
 /** Sync cfg cho mọi shard đang có proxy enabled. */
 export async function syncHubConfig(): Promise<void> {
   const shards = await listActiveHubShardIds();

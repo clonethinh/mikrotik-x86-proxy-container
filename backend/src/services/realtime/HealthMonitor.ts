@@ -5,6 +5,12 @@ import { realtimeHub } from '../../realtime/hub';
 import { getMikrotikService } from '../mikrotik/MikrotikService';
 import { config } from '../../lib/config';
 import { logger } from '../../lib/logger';
+import { resolveProxyEgress } from '../../lib/proxyEgressUtils';
+import { isHubMode } from '../../lib/hubUtils';
+
+function isValidWanIp(ip: string | null | undefined): ip is string {
+  return !!ip && !ip.startsWith('169.254.');
+}
 
 let timer: NodeJS.Timeout | null = null;
 let running = false;
@@ -39,29 +45,35 @@ async function syncWan(): Promise<void> {
         },
         update: { isUp: p.running, publicIp: p.publicIp, updatedAt: new Date() },
       });
-      if (p.publicIp) {
-        const proxy = await prisma.proxyUser.findUnique({ where: { pppoeIdx: p.index } });
-        if (proxy && proxy.publicIp !== p.publicIp) {
-          await prisma.ipHistory.create({
-            data: { proxyId: proxy.id, oldIp: proxy.publicIp, newIp: p.publicIp, source: 'sync' },
-          }).catch(() => {});
-          await prisma.proxyUser.update({
-            where: { id: proxy.id },
-            data: { publicIp: p.publicIp },
-          });
-          // Auto-fix srcnat rule if IP changed (Bug #4)
-          try {
-            await proxyService.updateSrcnatIp(p.index, p.publicIp);
-            await proxyService.updateDstnatIp(p.index, p.publicIp);
-            logger.info({ pppoeIdx: p.index, oldIp: proxy.publicIp, newIp: p.publicIp }, 'srcnat auto-updated after IP change');
-          } catch (e: any) {
-            logger.warn({ err: e.message, pppoeIdx: p.index }, 'srcnat auto-update failed');
+      if (!p.publicIp) continue;
+      const proxies = await prisma.proxyUser.findMany({ where: { enabled: true } });
+      for (const proxy of proxies) {
+        if (resolveProxyEgress(proxy) !== p.name) continue;
+        if (!isValidWanIp(p.publicIp)) continue;
+        if (proxy.publicIp === p.publicIp) continue;
+        await prisma.ipHistory.create({
+          data: { proxyId: proxy.id, oldIp: proxy.publicIp, newIp: p.publicIp, source: 'sync' },
+        }).catch(() => {});
+        await prisma.proxyUser.update({
+          where: { id: proxy.id },
+          data: { publicIp: p.publicIp },
+        });
+        try {
+          if (isHubMode()) {
+            await proxyService.updateSrcnatIp(proxy.pppoeIdx, p.publicIp, p.name);
+          } else {
+            await proxyService.updateSrcnatIp(proxy.pppoeIdx, p.publicIp);
+            await proxyService.updateDstnatIp(proxy.pppoeIdx, p.publicIp);
           }
-          realtimeHub.broadcast({
-            type: 'proxy.ip-changed',
-            payload: { id: proxy.id, pppoeIdx: p.index, newIp: p.publicIp, oldIp: proxy.publicIp },
-          });
+          logger.info({ pppoeIdx: proxy.pppoeIdx, egress: p.name, oldIp: proxy.publicIp, newIp: p.publicIp }, 'srcnat auto-updated after IP change');
+        } catch (e: unknown) {
+          const msg = e instanceof Error ? e.message : String(e);
+          logger.warn({ err: msg, pppoeIdx: proxy.pppoeIdx, egress: p.name }, 'srcnat auto-update failed');
         }
+        realtimeHub.broadcast({
+          type: 'proxy.ip-changed',
+          payload: { id: proxy.id, pppoeIdx: proxy.pppoeIdx, newIp: p.publicIp, oldIp: proxy.publicIp, egress: p.name },
+        });
       }
     }
     realtimeHub.broadcast({ type: 'wan.sync', payload: pppoes });

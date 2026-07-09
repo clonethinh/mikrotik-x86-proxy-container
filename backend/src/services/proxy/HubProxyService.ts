@@ -44,6 +44,7 @@ import {
   HUB_SRCNAT_LAN_PLACE_BEFORE,
   HUB_WAN_ADDRESS_LIST,
   hubShardSubnet,
+  hubShardIdFromContainerName,
   lanGatewayIp,
   HUB_SHARD_COUNT,
   HUB_TARBALL,
@@ -55,6 +56,8 @@ import { syncHubConfig, syncHubConfigForShard } from './HubConfigService';
 import { hubRateLimitService } from './HubRateLimitService';
 
 const hubExtracted = new Map<number, boolean>();
+const hubVethReady = new Map<number, boolean>();
+const hubShardRunning = new Map<number, boolean>();
 let hubLanAccessReady = false;
 let repairAllPending: ReturnType<typeof setTimeout> | null = null;
 const shardFlushPending = new Map<number, ReturnType<typeof setTimeout>>();
@@ -68,6 +71,7 @@ function rosIf(cond: string, body: string, elseBody?: string): string {
 
 export class HubProxyService {
   async ensureHubVeth(shardId: number): Promise<void> {
+    if (hubVethReady.get(shardId)) return;
     const mik = getMikrotikService();
     const bridge = config.network.bridgeName;
     const vethName = hubVethName(shardId);
@@ -98,6 +102,31 @@ export class HubProxyService {
       ),
       10_000,
     );
+    hubVethReady.set(shardId, true);
+  }
+
+  /**
+   * Fast path khi hub shard đã chạy — bỏ sync cfg (flushShard xử lý), bỏ container/set thừa.
+   */
+  async ensureHubShardReady(shardId: number): Promise<void> {
+    if (hubShardRunning.get(shardId)) return;
+
+    const mik = getMikrotikService();
+    const ctnName = hubContainerName(shardId);
+    const containers = await mik.getContainers();
+    const me = containers.find(c => c.name === ctnName);
+
+    if (!me || !hubExtracted.get(shardId)) {
+      await this.ensureHubContainer(shardId);
+      hubShardRunning.set(shardId, true);
+      return;
+    }
+
+    await this.ensureHubVeth(shardId);
+    if (me.status !== 'running') {
+      await this.startHubContainer(shardId);
+    }
+    hubShardRunning.set(shardId, true);
   }
 
   async ensureHubContainer(shardId: number): Promise<void> {
@@ -137,13 +166,16 @@ export class HubProxyService {
       hubExtracted.set(shardId, true);
     } else if (exists) {
       hubExtracted.set(shardId, true);
-      await mik.sshExec(
-        `/container/set [find name=${ctnName}] mountlists=${mountList} env=${healthEnv} stop-on-unhealthy=no`,
-        15_000,
-      ).catch(() => {});
+      if (exists.status !== 'running') {
+        await mik.sshExec(
+          `/container/set [find name=${ctnName}] mountlists=${mountList} env=${healthEnv} stop-on-unhealthy=no`,
+          15_000,
+        ).catch(() => {});
+      }
     }
 
     await this.startHubContainer(shardId);
+    hubShardRunning.set(shardId, true);
   }
 
   async startHubContainer(shardId: number): Promise<void> {
@@ -167,8 +199,8 @@ export class HubProxyService {
   }
 
   /** Gộp sync cfg + reload — 1 lần / shard sau burst tạo proxy */
-  scheduleShardFlush(shardId: number): void {
-    const ms = config.hub.reloadDebounceMs;
+  scheduleShardFlush(shardId: number, opts?: { delayMs?: number }): void {
+    const ms = opts?.delayMs ?? config.hub.reloadDebounceMs;
     const prev = shardFlushPending.get(shardId);
     if (prev) clearTimeout(prev);
     shardFlushPending.set(shardId, setTimeout(() => {
@@ -410,7 +442,8 @@ export class HubProxyService {
   }
 
   /** NAT hairpin + forward — LAN client dùng public IP hoặc IP gateway:extPort */
-  async ensureHubLanAccess(): Promise<void> {
+  async ensureHubLanAccess(opts?: { force?: boolean }): Promise<void> {
+    if (opts?.force) hubLanAccessReady = false;
     if (hubLanAccessReady) return;
     const mik = getMikrotikService();
     const { lanSubnets, lanInterfaces, containerCidr } = config.network;
@@ -557,25 +590,30 @@ export class HubProxyService {
   async ensureHubSlot(
     pppoeIdx: number,
     egressName: string,
-    opts?: { allowPendingIp?: boolean },
+    opts?: { allowPendingIp?: boolean; wanIp?: string | null },
   ): Promise<string | null> {
     assertProxyPoolPppoe(egressName);
     const mik = getMikrotikService();
-    const wanIp = await mik.peekPppoeIp(egressName);
+    let wanIp = opts?.wanIp;
+    if (wanIp === undefined) {
+      wanIp = await mik.peekPppoeIp(egressName);
+    }
     const hasValidIp = !!(wanIp && !wanIp.startsWith('169.254.'));
 
     if (!hasValidIp && !opts?.allowPendingIp) {
       throw new Error(`${egressName} chưa có IP public hợp lệ`);
     }
 
-    const coreScript = this.buildHubSlotCoreRosScript(pppoeIdx, egressName);
-    const out = await mik.sshExec(coreScript, 25_000);
+    let script = this.buildHubSlotCoreRosScript(pppoeIdx, egressName);
+    if (hasValidIp && wanIp) {
+      script += `\n${this.buildHubSlotIpRosScript(pppoeIdx, egressName, wanIp)}`;
+    }
+    const out = await mik.sshExec(script, 30_000);
     if (out.includes('failure:')) {
       throw new Error(out.trim().slice(0, 200));
     }
 
     if (hasValidIp && wanIp) {
-      await this.finalizeHubSlotIp(pppoeIdx, egressName, wanIp);
       return wanIp;
     }
 
@@ -626,20 +664,25 @@ export class HubProxyService {
     hubRateLimitService.scheduleApply();
   }
 
-  async applyHubProxy(proxyId: number): Promise<{ publicIp: string | null }> {
+  async applyHubProxy(
+    proxyId: number,
+    opts?: { wanIp?: string | null },
+  ): Promise<{ publicIp: string | null }> {
     const { prisma } = await import('../../db/prisma');
-    const { resolveEgressName } = await import('./PoolAllocator');
 
     const proxy = await prisma.proxyUser.findUnique({ where: { id: proxyId } });
     if (!proxy) throw new Error('Proxy not found');
 
-    const egressName = await resolveEgressName(proxy.pppoeIdx, proxyId);
+    const egressName = proxy.egressPppoeName || proxy.pppoeName || `pppoe-out${proxy.pppoeIdx}`;
 
     const shardId = hubShardId(proxy.pppoeIdx);
-    await this.ensureHubContainer(shardId);
+    await this.ensureHubShardReady(shardId);
     await this.ensureHubLanAccess();
-    const publicIp = await this.ensureHubSlot(proxy.pppoeIdx, egressName, { allowPendingIp: true });
-    this.scheduleShardFlush(shardId);
+    const publicIp = await this.ensureHubSlot(proxy.pppoeIdx, egressName, {
+      allowPendingIp: true,
+      wanIp: opts?.wanIp,
+    });
+    this.scheduleShardFlush(shardId, { delayMs: config.hub.applyFlushMs });
     hubRateLimitService.scheduleApply();
     if (config.hub.repairAllOnApply) {
       this.scheduleRepairAllHubSlots();
@@ -667,6 +710,21 @@ export class HubProxyService {
     });
 
     return { publicIp: publicIp || null };
+  }
+
+  /** Boot: cache shard đang chạy — apply tiếp theo dùng fast path ngay. */
+  async warmShardCacheFromContainers(): Promise<void> {
+    const mik = getMikrotikService();
+    const containers = await mik.getContainers().catch(() => []);
+    for (const c of containers) {
+      const sid = hubShardIdFromContainerName(c.name);
+      if (sid === null) continue;
+      hubExtracted.set(sid, true);
+      hubVethReady.set(sid, true);
+      if (c.status === 'running') {
+        hubShardRunning.set(sid, true);
+      }
+    }
   }
 
   /** Pre-create veth + mount placeholders for all configured shards. */

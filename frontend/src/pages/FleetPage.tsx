@@ -21,6 +21,8 @@ import ProxyStatsRow from '../components/proxy/ProxyStatsRow';
 import { extHttpPort, extSocksPort, HTTP_PORT_BASE, SOCKS_PORT_BASE } from '../lib/proxyUtils';
 import { copyText } from '../lib/clipboard';
 import { useTablePagination } from '../hooks/useTablePagination';
+import IpQualityTag from '../components/IpQualityTag';
+import EgressTag from '../components/EgressTag';
 
 const { Text } = Typography;
 
@@ -222,15 +224,28 @@ export default function FleetPage() {
       key: 'ip',
       width: 148,
       render: (_: unknown, r: FleetRow) => (
-        r.publicIp
-          ? (
+        <Flex vertical gap={4}>
+          {r.publicIp ? (
             <Tooltip title="Client kết nối qua IP động của PPPoE này">
               <span className="proxy-endpoint-chip proxy-endpoint-chip--http" style={{ padding: '2px 8px', borderRadius: 4 }}>
                 {r.publicIp}
               </span>
             </Tooltip>
-          )
-          : <Text type="secondary">—</Text>
+          ) : <Text type="secondary">—</Text>}
+          <Space size={4} wrap>
+            <IpQualityTag {...r} publicIp={r.publicIp} />
+            <EgressTag pppoeName={r.name} egressPppoeName={r.egressPppoeName} />
+            {r.quayipStatus && r.quayipStatus !== 'protected' ? (
+              <Tag
+                color={r.quayipStatus === 'ok' ? 'success' : r.quayipStatus === 'dead' ? 'error' : 'processing'}
+                bordered={false}
+                style={{ fontSize: 11 }}
+              >
+                {r.quayipLabel}
+              </Tag>
+            ) : null}
+          </Space>
+        </Flex>
       ),
     },
     {

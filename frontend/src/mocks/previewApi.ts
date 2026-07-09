@@ -125,7 +125,8 @@ export async function previewHttp<T>(method: string, path: string, body?: unknow
 
   const wanIdx = pathNum(basePath, 'wan');
   if (wanIdx != null || basePath.startsWith('/api/wan/')) {
-    if (basePath === '/api/wan/create-next') return ok({ name: 'pppoe-out11', index: 11 }) as T;
+    if (basePath === '/api/wan/create-queue') return ok({ pending: 0, processing: false, current: null, queueSize: 0 }) as T;
+    if (basePath === '/api/wan/create-next') return ok({ accepted: true, queued: true, jobId: 'mock', position: 1, queueSize: 1 }) as T;
     if (basePath === '/api/wan/bulk-enable') {
       return ok({ summary: { succeeded: (body as { indices?: number[] })?.indices?.length || 0, total: 0, failed: 0 } }) as T;
     }

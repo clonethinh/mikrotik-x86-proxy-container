@@ -16,6 +16,8 @@ import {
 import { api, WanInfo } from '../services/api';
 import { useWSEvent } from '../services/ws';
 import { useTablePagination } from '../hooks/useTablePagination';
+import IpQualityTag from '../components/IpQualityTag';
+import { resolveIpQuality } from '../lib/ipQuality';
 
 const { Text } = Typography;
 
@@ -43,6 +45,12 @@ interface BulkProgress {
   visible: boolean;
 }
 
+interface CreateQueueState {
+  pending: number;
+  processing: boolean;
+  currentName?: string;
+}
+
 function wanLabel(p: WanActionEvent): string {
   return p.pppoeName || (p.pppoeIdx != null ? `pppoe-out${p.pppoeIdx}` : 'PPPoE');
 }
@@ -58,14 +66,25 @@ export default function WanPage() {
   const [bulkBusy, setBulkBusy] = useState(false);
   const [progress, setProgress] = useState<BulkProgress>({ total: 0, done: 0, succeeded: 0, failed: 0, visible: false });
   const [resultsDrawer, setResultsDrawer] = useState<{ open: boolean; results: any[]; title: string }>({ open: false, results: [], title: '' });
-  const [creatingPppoe, setCreatingPppoe] = useState(false);
+  const [createQueue, setCreateQueue] = useState<CreateQueueState>({ pending: 0, processing: false });
 
   const load = useCallback(async () => {
     try { setWans(await api.get<WanInfo[]>('/api/wan')); }
     finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const loadCreateQueue = useCallback(async () => {
+    try {
+      const q = await api.get<CreateQueueState & { current?: { name?: string } | null }>('/api/wan/create-queue');
+      setCreateQueue({
+        pending: q.pending ?? 0,
+        processing: q.processing ?? false,
+        currentName: q.current?.name,
+      });
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { load(); loadCreateQueue(); }, [load, loadCreateQueue]);
 
   const clearWanToasts = useCallback((pppoeIdx?: number) => {
     msgApi.destroy('wan-create');
@@ -88,8 +107,7 @@ export default function WanPage() {
         const step = p.status === 'creating-proxy' ? 'tạo proxy' : 'apply proxy';
         msgApi.loading({ content: `${name}: đang ${step}…`, duration: 0, key: toastKey });
       } else if (p.status === 'done') {
-        clearWanToasts(p.pppoeIdx);
-        setCreatingPppoe(false);
+        if (p.pppoeIdx != null) msgApi.destroy(`wan-${p.pppoeIdx}`);
         setBusyIdx(null);
         load();
         const ms = p.durationMs ? ` (${(p.durationMs / 1000).toFixed(1)}s)` : '';
@@ -97,8 +115,7 @@ export default function WanPage() {
         const ipPart = p.publicIp ? ` · ${p.publicIp}` : ' · chờ IP WAN';
         msgApi.success(`${name} bật${ipPart}${proxyPart}${ms}`);
       } else if (p.status === 'error') {
-        clearWanToasts(p.pppoeIdx);
-        setCreatingPppoe(false);
+        if (p.pppoeIdx != null) msgApi.destroy(`wan-${p.pppoeIdx}`);
         setBusyIdx(null);
         load();
         msgApi.error(`${name}: ${p.error || 'lỗi'}`);
@@ -114,13 +131,66 @@ export default function WanPage() {
   }, [clearWanToasts, load, msgApi]);
 
   useWSEvent(
-    (msg) => msg.type === 'wan.sync' || msg.type === 'wan.action' || msg.type === 'wan.bulk' || msg.type === 'wan.created',
+    (msg) => msg.type === 'wan.sync' || msg.type === 'wan.action' || msg.type === 'wan.bulk' || msg.type === 'wan.created'
+      || msg.type.startsWith('wan.create.'),
     (msg) => {
       if (msg.type === 'wan.action' && msg.payload) {
         handleWanAction(msg.payload as WanActionEvent);
       }
       if (msg.type === 'wan.sync' || msg.type === 'wan.created') {
         load();
+      }
+      if (msg.type === 'wan.create.queue' && msg.payload) {
+        const p = msg.payload as CreateQueueState & { current?: { name?: string } | null };
+        const next = {
+          pending: p.pending ?? 0,
+          processing: p.processing ?? false,
+          currentName: p.current?.name,
+        };
+        setCreateQueue(next);
+        if (!next.processing && next.pending === 0) {
+          clearWanToasts();
+        }
+      }
+      if (msg.type === 'wan.create.processing' && msg.payload) {
+        const p = msg.payload as { name?: string; pending?: number };
+        setCreateQueue(prev => ({
+          ...prev,
+          processing: true,
+          pending: p.pending ?? prev.pending,
+          currentName: p.name ?? prev.currentName,
+        }));
+        if (p.name) {
+          msgApi.loading({
+            content: `Đang xử lý ${p.name}${p.pending ? ` · còn ${p.pending} trong hàng đợi` : ''}…`,
+            duration: 0,
+            key: 'wan-create',
+          });
+        }
+      }
+      if (msg.type === 'wan.create.done' && msg.payload) {
+        const p = msg.payload as { name?: string; enable?: boolean };
+        load();
+        if (p.enable) {
+          msgApi.loading({
+            content: `${p.name || 'PPPoE'} đã tạo — đang bật…`,
+            duration: 0,
+            key: 'wan-create',
+          });
+        } else {
+          msgApi.success(`${p.name || 'PPPoE'} đã tạo`);
+        }
+      }
+      if (msg.type === 'wan.create.error' && msg.payload) {
+        const p = msg.payload as { error?: string };
+        msgApi.error(`Tạo PPPoE: ${p.error || 'lỗi'}`);
+      }
+      if (msg.type === 'wan.create.queued' && msg.payload) {
+        const p = msg.payload as { position?: number; queueSize?: number };
+        setCreateQueue(prev => ({
+          ...prev,
+          pending: Math.max(prev.pending, (p.queueSize ?? 1) - (prev.processing ? 1 : 0)),
+        }));
       }
       if (msg.type === 'wan.internet-up' && msg.payload) {
         const p = msg.payload as { pppoeName?: string; publicIp?: string; pingMs?: number };
@@ -150,46 +220,58 @@ export default function WanPage() {
         }
       }
     },
-    [handleWanAction, load],
+    [handleWanAction, clearWanToasts, load, msgApi],
   );
 
   const createNextPppoe = async (autoEnable = true) => {
-    setCreatingPppoe(true);
     try {
-      msgApi.loading({
-        content: autoEnable ? 'Đang tạo pppoe-out…' : 'Đang tạo pppoe-out…',
-        duration: 0,
-        key: 'wan-create',
-      });
-      const r = await api.post<any>('/api/wan/create-next', { enable: autoEnable });
+      const r = await api.post<{
+        error?: string;
+        queued?: boolean;
+        position?: number;
+        queueSize?: number;
+      }>('/api/wan/create-next', { enable: autoEnable });
       if (r.error) {
-        clearWanToasts();
-        setCreatingPppoe(false);
         msgApi.error(r.error);
         return;
       }
-      load();
-      if (r.enabling || r.accepted) {
-        msgApi.loading({
-          content: `Đã tạo ${r.name} — đang bật…`,
-          duration: 0,
-          key: 'wan-create',
-        });
+      if (r.queued) {
+        setCreateQueue(prev => ({
+          ...prev,
+          pending: r.queueSize != null
+            ? Math.max(0, r.queueSize - (prev.processing ? 1 : 0))
+            : prev.pending + 1,
+        }));
+        const pos = r.position ?? r.queueSize ?? 1;
+        msgApi.info(`Đã thêm vào hàng đợi · vị trí #${pos}`);
+        if (!createQueue.processing) {
+          msgApi.loading({ content: 'Đang xử lý hàng đợi tạo PPPoE…', duration: 0, key: 'wan-create' });
+        }
         return;
       }
-      clearWanToasts();
-      setCreatingPppoe(false);
-      const action = r.created ? 'đã tạo' : 'đã có sẵn';
-      msgApi.success(`${r.name} ${action}`);
+      load();
     } catch (e: any) {
-      clearWanToasts();
-      setCreatingPppoe(false);
       msgApi.error(e.message);
     }
   };
 
+  const createQueueSize = createQueue.pending + (createQueue.processing ? 1 : 0);
+
   const up = wans.filter(w => w.running).length;
   const down = wans.length - up;
+
+  const ipStats = useMemo(() => {
+    let cgnat = 0;
+    let bad = 0;
+    let publicOk = 0;
+    for (const w of wans) {
+      const q = resolveIpQuality(w);
+      if (q.ipQuality === 'cgnat') cgnat++;
+      else if (q.ipUsable) publicOk++;
+      else if (w.publicIp || q.ipQuality !== 'missing') bad++;
+    }
+    return { cgnat, bad, publicOk };
+  }, [wans]);
 
   const filtered = useMemo(() => {
     return wans.filter(w => {
@@ -310,8 +392,25 @@ export default function WanPage() {
       ),
     },
     {
-      title: 'IP Public', dataIndex: 'publicIp', key: 'publicIp', width: 150,
-      render: (v: string | null) => (v ? <Tag color="blue">{v}</Tag> : <Tag>—</Tag>),
+      title: 'IP Public', key: 'publicIp', width: 200,
+      render: (_: unknown, r: WanInfo) => (
+        <Space size={4} wrap>
+          {r.publicIp
+            ? <Tag color="blue" className="proxy-endpoint-chip--http">{r.publicIp}</Tag>
+            : <Tag>—</Tag>}
+          <IpQualityTag {...r} publicIp={r.publicIp} />
+          {r.quayipStatus && r.quayipStatus !== 'protected' ? (
+            <Tooltip title="Script quayip trên router (comment OK/DEAD)">
+              <Tag
+                color={r.quayipStatus === 'ok' ? 'success' : r.quayipStatus === 'dead' ? 'error' : 'processing'}
+                bordered={false}
+              >
+                {r.quayipLabel}
+              </Tag>
+            </Tooltip>
+          ) : null}
+        </Space>
+      ),
     },
     {
       title: 'Uptime', dataIndex: 'uptime', key: 'uptime', width: 120,
@@ -369,6 +468,14 @@ export default function WanPage() {
             { key: 'up', title: 'Đang UP', value: up, icon: <CheckCircleOutlined />, accent: 'success' },
             { key: 'down', title: 'DOWN', value: down, icon: <CloseCircleOutlined />, accent: 'error', valueStyle: down ? { color: '#FF4D4F' } : undefined },
             { key: 'proxy', title: 'Có proxy', value: withProxy, icon: <ApiOutlined />, accent: 'purple' },
+            ...(ipStats.cgnat > 0 || ipStats.bad > 0 ? [{
+              key: 'badip',
+              title: 'IP xấu / CGNAT',
+              value: ipStats.cgnat + ipStats.bad,
+              suffix: ipStats.cgnat > 0 ? ` (${ipStats.cgnat} CGNAT)` : undefined,
+              icon: <WarningOutlined />,
+              accent: 'error' as const,
+            }] : []),
           ]}
         />
       )}
@@ -397,13 +504,19 @@ export default function WanPage() {
           actions={(
             <>
               <Button icon={<ReloadOutlined />} onClick={load}>Làm mới</Button>
-              <Tooltip title="Clone pppoe-out1 → tạo index tiếp, bật + auto-proxy">
-                <Button type="primary" icon={<ThunderboltOutlined />} loading={creatingPppoe} onClick={() => createNextPppoe(true)}>
+              {createQueueSize > 0 && (
+                <Tag color="processing" bordered={false}>
+                  Hàng đợi: {createQueueSize}
+                  {createQueue.currentName ? ` · ${createQueue.currentName}` : ''}
+                </Tag>
+              )}
+              <Tooltip title="Clone pppoe-out1 → tạo index tiếp, bật + auto-proxy (có thể bấm liên tục)">
+                <Button type="primary" icon={<ThunderboltOutlined />} onClick={() => createNextPppoe(true)}>
                   + PPPoE tiếp
                 </Button>
               </Tooltip>
-              <Tooltip title="Chỉ tạo interface, chưa bật dial">
-                <Button loading={creatingPppoe} onClick={() => createNextPppoe(false)}>Tạo (chưa bật)</Button>
+              <Tooltip title="Chỉ tạo interface, chưa bật dial (có thể bấm liên tục)">
+                <Button onClick={() => createNextPppoe(false)}>Tạo (chưa bật)</Button>
               </Tooltip>
             </>
           )}

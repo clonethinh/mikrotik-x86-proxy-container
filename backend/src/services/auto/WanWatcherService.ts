@@ -10,6 +10,8 @@ import { autoProvisionOrchestrator } from './AutoProvisionOrchestrator';
 import { hubProxyService } from '../proxy/HubProxyService';
 import { isHubMode } from '../../lib/hubUtils';
 import { clearWanProbeCache, probeWanInternet } from '../wan/WanInternetProbe';
+import { resolveProxyEgress } from '../../lib/proxyEgressUtils';
+import { reallocateProxiesOnWanDisable } from '../proxy/PoolAllocator';
 
 type Snapshot = Map<string, { running: boolean; publicIp: string | null; idx: number }>;
 
@@ -17,11 +19,52 @@ function isValidWanIp(ip: string | null | undefined): ip is string {
   return !!ip && !ip.startsWith('169.254.');
 }
 
-/** Khi IP WAN lên — chỉ patch rule phụ thuộc IP (nhẹ CPU), không re-apply full slot */
-async function tryFinalizePendingProxy(pppoeIdx: number, pppoeName: string, publicIp: string) {
+function isBadWanIp(ip: string | null | undefined): ip is string {
+  return !!ip && ip.startsWith('169.254.');
+}
+
+/** WAN egress nhận IP xấu (169.254 / mất IP) — đánh dấu pending rồi thử đổi egress pool. */
+async function handleBadEgressIp(egressName: string, badIp: string | null): Promise<void> {
+  if (!isHubMode()) return;
+  const proxies = await prisma.proxyUser.findMany({ where: { enabled: true } });
+  for (const proxy of proxies) {
+    if (resolveProxyEgress(proxy) !== egressName) continue;
+    await prisma.proxyUser.update({
+      where: { id: proxy.id },
+      data: {
+        status: 'pending',
+        statusMessage: `${egressName} IP xấu (${badIp || 'none'}) — chờ IP public hoặc đổi egress`,
+      },
+    });
+    realtimeHub.broadcast({
+      type: 'proxy.status',
+      payload: { id: proxy.id, status: 'pending', pppoeIdx: proxy.pppoeIdx },
+    });
+  }
+  const { reallocated, pending } = await reallocateProxiesOnWanDisable(egressName);
+  if (reallocated > 0) {
+    logger.info({ egressName, badIp, reallocated, pending }, 'bad egress — reallocated proxies');
+  }
+}
+
+/** Tất cả proxy dùng egressName làm WAN ra — gọi khi IP của interface đó đổi. */
+async function tryFinalizeEgressIpChange(egressName: string, publicIp: string): Promise<void> {
+  if (!isHubMode() || !isValidWanIp(publicIp)) return;
+  const proxies = await prisma.proxyUser.findMany({ where: { enabled: true } });
+  for (const proxy of proxies) {
+    if (resolveProxyEgress(proxy) !== egressName) continue;
+    await tryFinalizeSlotProxy(proxy.pppoeIdx, egressName, publicIp);
+  }
+}
+
+/** Khi IP egress WAN lên — patch NAT slot (chỉ khi proxy slot dùng đúng egress). */
+async function tryFinalizeSlotProxy(pppoeIdx: number, egressName: string, publicIp: string) {
   if (!isHubMode() || !isValidWanIp(publicIp)) return;
   const proxy = await prisma.proxyUser.findUnique({ where: { pppoeIdx } });
   if (!proxy?.enabled) return;
+
+  const egress = resolveProxyEgress(proxy);
+  if (egress !== egressName) return;
 
   const needsFinalize = proxy.status === 'pending'
     || !proxy.publicIp
@@ -29,8 +72,6 @@ async function tryFinalizePendingProxy(pppoeIdx: number, pppoeName: string, publ
     || proxy.publicIp !== publicIp;
 
   if (!needsFinalize) return;
-
-  const egress = proxy.egressPppoeName || pppoeName;
   try {
     const probe = await probeWanInternet(egress, publicIp);
     if (!probe.ok && !probe.skipped) {
@@ -212,15 +253,19 @@ async function tick() {
             payload: { pppoeName: name, pppoeIdx: cur.idx, oldIp: prev.publicIp, newIp: cur.publicIp },
           });
           if (isValidWanIp(cur.publicIp)) {
-            void tryFinalizePendingProxy(cur.idx, name, cur.publicIp);
+            void tryFinalizeEgressIpChange(name, cur.publicIp);
+          } else if (isBadWanIp(cur.publicIp)) {
+            void handleBadEgressIp(name, cur.publicIp);
           }
+        } else if (isBadWanIp(cur.publicIp) && cur.running) {
+          void handleBadEgressIp(name, cur.publicIp);
         } else if (isValidWanIp(cur.publicIp) && (!prev.publicIp || !isValidWanIp(prev.publicIp))) {
           clearWanProbeCache(name);
-          void tryFinalizePendingProxy(cur.idx, name, cur.publicIp);
+          void tryFinalizeEgressIpChange(name, cur.publicIp);
         } else if (isValidWanIp(cur.publicIp) && cur.running) {
           const proxy = await prisma.proxyUser.findUnique({ where: { pppoeIdx: cur.idx } });
           if (proxy?.status === 'pending') {
-            void tryFinalizePendingProxy(cur.idx, name, cur.publicIp);
+            void tryFinalizeEgressIpChange(name, cur.publicIp);
           } else if (!proxy && settings.mode !== 'off') {
             const disc = await prisma.wanDiscovery.findUnique({ where: { pppoeName: name } });
             if (disc && ['queued', 'error', 'discovered'].includes(disc.workflowState)) {

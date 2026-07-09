@@ -7,6 +7,7 @@ import App from './App';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { proxyTheme } from './theme/proxyTheme';
 import './styles/proxy.css';
+import './styles/proxies-page.css';
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>

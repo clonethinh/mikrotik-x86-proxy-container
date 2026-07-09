@@ -31,8 +31,11 @@ async function run(cfg) {
     return { ok: true, skipped: true };
   }
 
-  step('10-build', 'Building frontend...');
+  step('10-build', 'Building frontend (desktop)...');
   runCmd('npm run build', path.join(cfg.root, 'frontend'));
+
+  step('10-build', 'Building frontend-mobile (HeroUI)...');
+  runCmd('npm run build', path.join(cfg.root, 'frontend-mobile'));
 
   step('10-build', 'Docker buildx (linux/amd64)...');
   runCmd('docker buildx build --platform linux/amd64 -t webuiproxymikrotik:latest --load .', cfg.root);

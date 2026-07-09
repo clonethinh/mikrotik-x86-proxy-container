@@ -309,8 +309,10 @@ export async function syncClocks(force = false): Promise<ClockSyncResult> {
     const dateChanged = prevRouterDate !== routerDate;
     if (dateChanged) {
       const yymmdd = routerDate.slice(2).replace(/-/g, '');
+      const { listTailableHubShardIds } = await import('../proxy/HubConfigService');
+      const reloadShards = await listTailableHubShardIds();
       await Promise.all(
-        Array.from({ length: shardCount }, (_, shardId) =>
+        reloadShards.map((shardId) =>
           hubProxyService.reloadHubShard(shardId).catch((e: unknown) => {
             const msg = e instanceof Error ? e.message : 'reload failed';
             logger.warn({ shardId, err: msg.slice(0, 80) }, 'hub reload after clock sync failed');

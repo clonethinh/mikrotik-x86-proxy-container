@@ -1,37 +1,50 @@
 # Multi-stage Dockerfile for webuiproxymikrotik
-# Stage 1: build on debian (has prisma + working binary)
-# Stage 2: minimal alpine runtime with pre-generated prisma client
-# Build: docker build --platform linux/amd64 -t webuiproxymikrotik:latest .
+# Build: docker buildx build --platform linux/amd64 -t webuiproxymikrotik:latest --load .
 # For RouterOS x86_64 container
+#
+# IMPORTANT FOR SPEED:
+# - Always use .dockerignore (we added one)
+# - For dev: use `npm run setup -- --skip-build` to avoid rebuild
+# - Prefer REST deploy scripts for code changes instead of full rebuild
 
 # ============ Stage 1: builder (debian, native prisma binary) ============
 FROM node:22-bookworm-slim AS builder
-RUN apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
+# Use BuildKit cache mount for npm (much faster on repeated builds)
+RUN --mount=type=cache,target=/root/.npm \
+    apt-get update -y && apt-get install -y openssl ca-certificates && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build
-# Install ALL deps first (incl. typescript for build)
+
+# Copy only package files first → best cache layer
 COPY backend/package.json backend/package-lock.json* ./
-RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
-# Copy prisma schema + generate client
+RUN --mount=type=cache,target=/root/.npm \
+    npm ci --no-audit --no-fund || npm install --no-audit --no-fund
+
+# Prisma (rarely changes)
 COPY backend/prisma ./prisma
 RUN npx prisma generate
-# Copy backend source and build TS -> dist
+
+# Backend source (changes often)
 COPY backend/tsconfig.json ./
 COPY backend/src ./src
 RUN npx tsc
-# Now prune dev deps for runtime
+
+# Prune + pre-create DB
 RUN npm prune --omit=dev
-# Pre-create empty DB with schema (volume mount overrides it)
 RUN DATABASE_URL=file:/build/proxy.db npx prisma db push --skip-generate --accept-data-loss
 
-# Copy frontend static (pre-built on host WSL via npm run build)
+# Frontend dists are pre-built on host (see setup/steps/build.js)
+# Only copy the small dist folders (not the full source)
 COPY frontend/dist ./public
+COPY frontend-mobile/dist ./public/mobile
 
-# ============ Stage 2: runtime (debian-slim, has openssl for prisma) ============
+# ============ Stage 2: runtime (debian-slim) ============
 FROM node:22-bookworm-slim AS runtime
 RUN apt-get update -y && apt-get install -y openssl ca-certificates tini iproute2 && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 
-# Copy pre-built artifacts (builder image)
+# Copy only what is needed from builder
 COPY --from=builder /build/node_modules ./node_modules
 COPY --from=builder /build/dist ./dist
 COPY --from=builder /build/prisma ./prisma

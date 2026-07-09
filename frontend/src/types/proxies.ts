@@ -9,7 +9,7 @@ export interface LiveMetrics {
   usedBytes?: string;
   quotaPct: number | null;
   sampledAt?: string;
-  source?: 'admin' | 'logs';
+  source?: 'admin' | 'logs' | 'interface';
 }
 
 export interface ProxyRequestLogRow {

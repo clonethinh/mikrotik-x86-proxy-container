@@ -6,9 +6,12 @@ import ProxyPageShell from '../components/proxy/ProxyPageShell';
 import {
   ApiOutlined, CheckCircleFilled, CloseCircleFilled, ClockCircleOutlined, SyncOutlined,
   PlayCircleOutlined, ReloadOutlined, UserOutlined, LockOutlined,
-  ThunderboltOutlined, CodeOutlined, InfoCircleOutlined,
+  ThunderboltOutlined, CodeOutlined, InfoCircleOutlined, SafetyCertificateOutlined,
 } from '@ant-design/icons';
-import { api, AutoProxySettings, ClockSyncResult, MikrotikTestResult, RouterScriptStatus } from '../services/api';
+import {
+  api, AutoProxySettings, ClockSyncResult, FirewallReconcileResult, FirewallReconcileStatus,
+  MikrotikTestResult, RouterScriptStatus,
+} from '../services/api';
 import { useAuth } from '../services/auth';
 
 const { Text } = Typography;
@@ -35,6 +38,48 @@ export default function SettingsPage() {
   const [scriptsLoading, setScriptsLoading] = useState(false);
   const [ensuringScripts, setEnsuringScripts] = useState(false);
   const [runningScript, setRunningScript] = useState<string | null>(null);
+  const [fwReconcile, setFwReconcile] = useState<FirewallReconcileStatus | null>(null);
+  const [fwLoading, setFwLoading] = useState(false);
+  const [fwRunning, setFwRunning] = useState(false);
+  const [fwLastResult, setFwLastResult] = useState<FirewallReconcileResult | null>(null);
+
+  const loadFirewallReconcile = async () => {
+    setFwLoading(true);
+    try {
+      const r = await api.get<FirewallReconcileStatus>('/api/system/firewall/reconcile');
+      setFwReconcile(r);
+      if (r.lastResult) setFwLastResult(r.lastResult);
+    } catch { /* ignore */ }
+    finally { setFwLoading(false); }
+  };
+
+  const runFirewallReconcile = async (opts: { dryRun?: boolean; repairAll?: boolean }) => {
+    setFwRunning(true);
+    try {
+      message.loading({ content: opts.dryRun ? 'Đang kiểm tra firewall…' : 'Đang phục hồi firewall…', key: 'fw-reconcile', duration: 0 });
+      const r = await api.post<{ ok: boolean } & FirewallReconcileResult>('/api/system/firewall/reconcile', {
+        dryRun: opts.dryRun === true,
+        repair: opts.dryRun !== true,
+        repairAll: opts.repairAll === true,
+      });
+      setFwLastResult(r);
+      await loadFirewallReconcile();
+      message.destroy('fw-reconcile');
+      const { audit, removed, repaired } = r;
+      if (opts.dryRun) {
+        message.info(`Audit: ${audit.orphans.length} orphan · ${audit.missing.length} thiếu · ${audit.duplicates.length} trùng`);
+      } else {
+        message.success(
+          `Xong: xóa ${removed.nat + removed.filter + removed.mangle} rule · repair ${repaired.ok}/${repaired.attempted} slot`,
+        );
+      }
+    } catch (e: any) {
+      message.destroy('fw-reconcile');
+      message.error(e.message);
+    } finally {
+      setFwRunning(false);
+    }
+  };
 
   const loadRouterScripts = async () => {
     setScriptsLoading(true);
@@ -51,7 +96,10 @@ export default function SettingsPage() {
       setAutoProxy(r);
       autoForm.setFieldsValue(r);
     }).catch(() => {});
-    if (user?.role === 'admin') loadRouterScripts();
+    if (user?.role === 'admin') {
+      loadRouterScripts();
+      loadFirewallReconcile();
+    }
   }, [user?.role]);
 
   const ensureRouterScripts = async () => {
@@ -249,6 +297,67 @@ export default function SettingsPage() {
           </Form>
         )}
       </SettingsSectionCard>
+
+      {user?.role === 'admin' && (
+        <SettingsSectionCard
+          title="Phục hồi Firewall"
+          description="Audit & sửa filter · NAT · mangle khi chạy proxy quy mô lớn"
+          icon={<SafetyCertificateOutlined />}
+          accent="#EB2F96"
+          extra={(
+            <Button icon={<ReloadOutlined />} loading={fwLoading} onClick={loadFirewallReconcile}>Refresh</Button>
+          )}
+        >
+          <DismissibleAlert
+            bannerId="settings-firewall-reconcile-info"
+            type="info"
+            showIcon
+            style={{ marginBottom: 12 }}
+            message="Reconcile hub firewall"
+            description="Kiểm tra rule trùng/mồ côi (slot không còn trong DB), dọn hub-wan IP cũ, repair từng batch slot — tránh spike CPU trên router."
+          />
+          <Space wrap style={{ marginBottom: 12 }}>
+            <Button loading={fwRunning} onClick={() => runFirewallReconcile({ dryRun: true })}>
+              Kiểm tra (dry-run)
+            </Button>
+            <Button type="primary" loading={fwRunning} icon={<SyncOutlined />} onClick={() => runFirewallReconcile({})}>
+              Phục hồi batch
+            </Button>
+            <Button danger loading={fwRunning} onClick={() => runFirewallReconcile({ repairAll: true })}>
+              Repair toàn bộ
+            </Button>
+          </Space>
+          {fwReconcile && (
+            <Descriptions column={{ xs: 1, sm: 2 }} bordered size="small" style={{ marginBottom: 12 }}>
+              <Descriptions.Item label="Tự động">
+                <Tag color={fwReconcile.enabled ? 'success' : 'default'} bordered={false}>
+                  {fwReconcile.enabled ? 'Bật' : 'Tắt'}
+                </Tag>
+              </Descriptions.Item>
+              <Descriptions.Item label="Chu kỳ">
+                {Math.round(fwReconcile.intervalMs / 60000)} phút · batch {fwReconcile.maxSlotsPerPass} slot
+              </Descriptions.Item>
+            </Descriptions>
+          )}
+          {fwLastResult && (
+            <Descriptions column={{ xs: 1, sm: 2 }} bordered size="small">
+              <Descriptions.Item label="Lần chạy cuối">
+                {new Date(fwLastResult.at).toLocaleString('vi-VN')} ({fwLastResult.durationMs}ms)
+              </Descriptions.Item>
+              <Descriptions.Item label="Orphan / thiếu / trùng">
+                {fwLastResult.audit.orphans.length} / {fwLastResult.audit.missing.length} / {fwLastResult.audit.duplicates.length}
+              </Descriptions.Item>
+              <Descriptions.Item label="Đã xóa">
+                NAT {fwLastResult.removed.nat} · filter {fwLastResult.removed.filter} · mangle {fwLastResult.removed.mangle}
+              </Descriptions.Item>
+              <Descriptions.Item label="Repair">
+                {fwLastResult.repaired.ok}/{fwLastResult.repaired.attempted} slot
+                {fwLastResult.repaired.failed > 0 ? ` · ${fwLastResult.repaired.failed} lỗi` : ''}
+              </Descriptions.Item>
+            </Descriptions>
+          )}
+        </SettingsSectionCard>
+      )}
 
       {user?.role === 'admin' && (
         <SettingsSectionCard

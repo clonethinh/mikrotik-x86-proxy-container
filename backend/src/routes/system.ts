@@ -8,6 +8,7 @@ import { maxPppoeIdx, safeComputePorts } from '../lib/networkUtils';
 import { isManagedPppoeName } from '../lib/pppoeUtils';
 import { audit } from '../services/audit';
 import { deriveQuayipStatus, QUAYIP_STATUS_LABELS } from '../lib/quayipUtils';
+import { classifyPublicIp } from '../lib/ipQualityUtils';
 import {
   getRouterScriptService,
   MANAGED_ROUTER_SCRIPTS,
@@ -59,11 +60,16 @@ export default async function systemRoutes(app: FastifyInstance) {
           running: p.running,
           comment: p.comment,
         });
+        const ipInfo = classifyPublicIp(p.publicIp);
         return {
           ...p,
           comment: p.comment || '',
           quayipStatus,
           quayipLabel: QUAYIP_STATUS_LABELS[quayipStatus],
+          ipQuality: ipInfo.quality,
+          ipQualityLabel: ipInfo.label,
+          ipUsable: ipInfo.usable,
+          ipQualityHint: ipInfo.hint,
           extHttpPort: ports?.extHttpPort ?? config.network.extHttpPortBase + p.index,
           extSocksPort: ports?.extSocksPort ?? config.network.extSocksPortBase + p.index,
           containerIp: hubMode ? (db?.vethIp?.split('/')[0] ?? null) : (ports?.containerIp ?? null),
@@ -123,6 +129,45 @@ export default async function systemRoutes(app: FastifyInstance) {
         hubContainer: 'proxy3p-hub',
       },
     };
+  });
+
+  // Firewall reconcile — audit orphan/duplicate, repair hub slots
+  app.get('/api/system/firewall/reconcile', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const u = req.user as { role?: string };
+    if (u.role !== 'admin') return reply.code(403).send({ error: 'admin only' });
+    const { getFirewallReconcileStatus } = await import('../services/mikrotik/FirewallReconcileService');
+    return getFirewallReconcileStatus();
+  });
+
+  app.post('/api/system/firewall/reconcile', { preHandler: [app.authenticate] }, async (req, reply) => {
+    const u = req.user as { uid?: number; username?: string; role?: string };
+    if (u.role !== 'admin') return reply.code(403).send({ error: 'admin only' });
+    const body = (req.body || {}) as { dryRun?: boolean; repair?: boolean; repairAll?: boolean };
+    try {
+      const { enqueueFirewallReconcile } = await import('../services/mikrotik/FirewallReconcileService');
+      const result = await enqueueFirewallReconcile({
+        dryRun: body.dryRun === true,
+        repair: body.repair !== false,
+        repairAll: body.repairAll === true,
+      });
+      await audit({
+        userId: u.uid,
+        username: u.username || 'admin',
+        action: 'firewall-reconcile',
+        ip: req.ip,
+        details: {
+          dryRun: result.dryRun,
+          removed: result.removed,
+          repaired: result.repaired,
+          orphans: result.audit.orphans.length,
+          missing: result.audit.missing.length,
+        },
+      });
+      return { ok: true, ...result };
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return reply.code(400).send({ error: msg });
+    }
   });
 
   // SSH brute-force blacklist status

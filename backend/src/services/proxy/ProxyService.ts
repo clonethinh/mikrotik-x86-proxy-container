@@ -30,7 +30,9 @@ import {
   isHubMode,
 } from '../../lib/hubUtils';
 import { hubProxyService } from './HubProxyService';
+import { hubRateLimitService } from './HubRateLimitService';
 import { syncHubConfig } from './HubConfigService';
+import { resolveProxyEgress } from '../../lib/proxyEgressUtils';
 import { z } from 'zod';
 
 const MAX_PPPOE_IDX = maxPppoeIdx();
@@ -65,6 +67,12 @@ export interface CreateProxyInput {
   username?: string;
   password?: string;
   note?: string;
+  /** IP WAN đã biết từ bước enable — tránh peek/SSH thừa khi apply hub */
+  wanIp?: string | null;
+}
+
+export interface ApplyProxyOpts {
+  wanIp?: string | null;
 }
 
 let legacyFirewallRangesRemoved = false;
@@ -131,7 +139,7 @@ class ProxyService {
       data: {
         pppoeIdx: parsed.pppoeIdx,
         pppoeName: ports.pppoeName,
-        egressPppoeName: hub ? null : ports.pppoeName,
+        egressPppoeName: ports.pppoeName,
         vethName: hub ? hubVethName(hubShardId(parsed.pppoeIdx)) : ports.vethName,
         vethIp: hub ? `${hubSlotIp(parsed.pppoeIdx)}/32` : ports.vethIp,
         gatewayIp: hub ? `${hubShardGw(hubShardId(parsed.pppoeIdx))}/24` : ports.gatewayIp,
@@ -254,6 +262,25 @@ class ProxyService {
   async start(id: number) {
     const proxy = await prisma.proxyUser.findUnique({ where: { id } });
     if (!proxy) throw new Error('Proxy not found');
+
+    if (isHubMode()) {
+      const mik = getMikrotikService();
+      const pppoes = await mik.getPppoeInterfaces().catch(() => []);
+      const slotWan = pppoes.find(p => p.index === proxy.pppoeIdx);
+      const wanIp = slotWan?.running ? slotWan.publicIp : null;
+
+      await routerQueue.enqueue(async () => {
+        await hubProxyService.applyHubProxy(id, { wanIp });
+        hubRateLimitService.scheduleApply();
+      });
+      const updated = await prisma.proxyUser.update({
+        where: { id },
+        data: { enabled: true, status: 'running' },
+      });
+      realtimeHub.broadcast({ type: 'proxy.status', payload: { id, status: 'running', enabled: true } });
+      return updated;
+    }
+
     await routerQueue.enqueue(async () => {
       await this.startContainer(proxy.pppoeIdx);
     });
@@ -268,6 +295,17 @@ class ProxyService {
   async stop(id: number) {
     const proxy = await prisma.proxyUser.findUnique({ where: { id } });
     if (!proxy) throw new Error('Proxy not found');
+
+    if (isHubMode()) {
+      const updated = await prisma.proxyUser.update({
+        where: { id },
+        data: { enabled: false, status: 'stopped' },
+      });
+      hubRateLimitService.scheduleApply();
+      realtimeHub.broadcast({ type: 'proxy.status', payload: { id, status: 'stopped', enabled: false } });
+      return updated;
+    }
+
     await routerQueue.enqueue(async () => {
       await this.stopContainer(proxy.containerName);
     });
@@ -283,16 +321,26 @@ class ProxyService {
   async restart(id: number) {
     const proxy = await prisma.proxyUser.findUnique({ where: { id } });
     if (!proxy) throw new Error('Proxy not found');
+
+    if (isHubMode()) {
+      await routerQueue.enqueue(async () => {
+        await syncHubConfig();
+        const sid = hubShardId(proxy.pppoeIdx);
+        await hubProxyService.reloadHubShard(sid);
+        hubRateLimitService.scheduleApply();
+      });
+      realtimeHub.broadcast({ type: 'proxy.status', payload: { id, status: 'running' } });
+      return { ok: true, mode: 'hub-reload' as const };
+    }
+
     await routerQueue.enqueue(async () => {
       const mik = getMikrotikService();
       const ctnName = proxy.containerName;
       const containers = await mik.getContainers();
       const c = containers.find(x => x.name === ctnName);
       if (!c) throw new Error(`Container ${ctnName} not found`);
-      // Stop
       if (c.status === 'running') {
         await mik.restPost('/rest/container/stop', { id: c.id });
-        // Wait for full stop
         for (let i = 0; i < 10; i++) {
           await new Promise(r => setTimeout(r, 2000));
           const fresh = await mik.getContainers();
@@ -300,9 +348,7 @@ class ProxyService {
           if (me?.status === 'stopped') break;
         }
       }
-      // Start
       await mik.restPost('/rest/container/start', { id: c.id });
-      // Verify
       for (let i = 0; i < 5; i++) {
         await new Promise(r => setTimeout(r, 3000));
         const fresh = await mik.getContainers();
@@ -314,7 +360,7 @@ class ProxyService {
       }
       throw new Error(`Container ${ctnName} không start được sau restart`);
     });
-    return { ok: true };
+    return { ok: true, mode: 'legacy' as const };
   }
 
   // ============ LOGS ============
@@ -538,15 +584,15 @@ class ProxyService {
 
     const result = await routerQueue.enqueue(async () => {
       const mik = getMikrotikService();
-      // 60s timeout: PPPoE reconnect + DHCP lease + public IP assignment can take 30-45s
-      // especially on first connect after cable/fiber reset
-      const reloadIf = proxy.egressPppoeName || proxy.pppoeName;
+      const reloadIf = resolveProxyEgress(proxy);
       const newIp = await mik.reloadPppoeIp(reloadIf, 60_000);
       if (newIp === 'TIMEOUT') {
         throw new Error('PPPoE reconnect timeout - không lấy được IP mới');
       }
+      if (!newIp || newIp.startsWith('169.254.')) {
+        throw new Error(`PPPoE ${reloadIf} nhận IP không hợp lệ (${newIp || 'none'})`);
+      }
 
-      // Update DB
       await prisma.ipHistory.create({
         data: {
           proxyId: proxy.id,
@@ -554,20 +600,28 @@ class ProxyService {
           newIp,
           source: 'pppoe-reconnect',
         },
-      });
+      }).catch(() => {});
+
+      if (isHubMode()) {
+        await hubProxyService.finalizeHubSlotIp(proxy.pppoeIdx, reloadIf, newIp);
+      } else {
+        await this.updateSrcnatIp(proxy.pppoeIdx, newIp);
+        await this.updateDstnatIp(proxy.pppoeIdx, newIp);
+      }
+
       const updated = await prisma.proxyUser.update({
         where: { id },
-        data: { publicIp: newIp },
+        data: {
+          publicIp: newIp,
+          statusMessage: isHubMode()
+            ? `hub slot ${proxy.pppoeIdx} · ${reloadIf} · ${newIp} (reload)`
+            : `reload IP · ${newIp}`,
+        },
       });
-
-      // Update srcnat rule to-addresses (idempotent)
-      await this.updateSrcnatIp(proxy.pppoeIdx, newIp);
-      // Update dstnat dst-address if rule has it
-      await this.updateDstnatIp(proxy.pppoeIdx, newIp);
 
       realtimeHub.broadcast({
         type: 'proxy.ip-changed',
-        payload: { id, pppoeIdx: proxy.pppoeIdx, newIp, oldIp: proxy.publicIp },
+        payload: { id, pppoeIdx: proxy.pppoeIdx, newIp, oldIp: proxy.publicIp, egress: reloadIf },
       });
       return updated;
     });
@@ -584,21 +638,99 @@ class ProxyService {
     const hc = (ctn.healthcheckStatus || '').toLowerCase();
     if (hc.startsWith('good')) return true;
     const st = (ctn.status || '').toLowerCase();
-    // Hub: 3proxy bind -i slot IP → portcheck 127.0.0.1:20001 fail; REST status thường rỗng
+    // Hub: portcheck bind slot IP fail; kiểm tra shard container đang chạy
     if (isHubMode() && isHubContainerName(proxy.containerName)) {
-      return true;
+      const sid = hubShardId(proxy.pppoeIdx);
+      const shardCtn = containers.find(c => c.name === hubContainerName(sid));
+      if (!shardCtn) return false;
+      const shardSt = (shardCtn.status || '').toLowerCase();
+      return ['running', 'r', 'healthy', 'h'].includes(shardSt);
     }
     return ['running', 'r', 'healthy', 'h'].includes(st);
+  }
+
+  /** Ping thật qua interface PPPoE (RouterOS /tool ping) — dùng cho Test + auto monitor. */
+  async pingEgress(id: number, opts?: { persist?: boolean; broadcast?: boolean }) {
+    const persist = opts?.persist !== false;
+    const broadcast = opts?.broadcast !== false;
+    const proxy = await prisma.proxyUser.findUnique({ where: { id } });
+    if (!proxy) throw new Error('Proxy not found');
+
+    const egress = proxy.egressPppoeName || proxy.pppoeName || `pppoe-out${proxy.pppoeIdx}`;
+    const exitIp = proxy.publicIp;
+    if (!exitIp || exitIp.startsWith('169.254.')) {
+      const err = `WAN IP không hợp lệ (${exitIp || 'none'})`;
+      if (persist) {
+        await prisma.proxyUser.update({
+          where: { id },
+          data: { lastCheckAt: new Date(), statusMessage: err },
+        });
+      }
+      if (broadcast) {
+        realtimeHub.broadcast({
+          type: 'proxy.health',
+          payload: { id, ok: false, latencyMs: null, pingMs: null, exitIp, error: err, pppoeIdx: proxy.pppoeIdx },
+        });
+      }
+      return { ok: false, latencyMs: null, pingMs: null, exitIp, error: err };
+    }
+
+    if (!config.wan.pingEnabled) {
+      const latencyMs = 0;
+      if (persist) {
+        await prisma.proxyUser.update({
+          where: { id },
+          data: { lastCheckAt: new Date(), lastLatencyMs: latencyMs, statusMessage: `egress ${exitIp} (ping tắt)` },
+        });
+      }
+      if (broadcast) {
+        realtimeHub.broadcast({
+          type: 'proxy.health',
+          payload: { id, ok: true, latencyMs, pingMs: latencyMs, exitIp, error: null, pppoeIdx: proxy.pppoeIdx },
+        });
+      }
+      return { ok: true, latencyMs, pingMs: latencyMs, exitIp, error: null };
+    }
+
+    const mik = getMikrotikService();
+    const ping = await mik.pingViaInterface(egress, config.wan.pingTarget, config.wan.pingCount);
+    const ok = ping.ok;
+    const pingMs = ping.avgRttMs;
+    const latencyMs = pingMs ?? null;
+    const error = ok ? null : `Ping ${config.wan.pingTarget} qua ${egress} fail (received=${ping.received})`;
+
+    if (persist) {
+      await prisma.proxyUser.update({
+        where: { id },
+        data: {
+          lastCheckAt: new Date(),
+          lastLatencyMs: latencyMs,
+          statusMessage: ok
+            ? (pingMs != null ? `ping ${pingMs}ms · ${exitIp}` : `ping OK · ${exitIp}`)
+            : error,
+        },
+      });
+    }
+
+    if (broadcast) {
+      realtimeHub.broadcast({
+        type: 'proxy.health',
+        payload: { id, ok, latencyMs, pingMs, exitIp, error, pppoeIdx: proxy.pppoeIdx },
+      });
+    }
+
+    return { ok, latencyMs, pingMs, exitIp, error };
   }
 
   async healthCheck(id: number) {
     const proxy = await prisma.proxyUser.findUnique({ where: { id } });
     if (!proxy) throw new Error('Proxy not found');
 
-    const start = Date.now();
     let ok = false;
     let exitIp: string | null = null;
     let error: string | null = null;
+    let latencyMs: number | null = null;
+    let pingMs: number | null = null;
 
     const containerOk = await this.isProxyContainerHealthy(proxy);
 
@@ -611,7 +743,16 @@ class ProxyService {
       error = e.message;
     }
 
-    const latencyMs = Date.now() - start;
+    if (ok) {
+      const ping = await this.pingEgress(id, { persist: false, broadcast: false });
+      pingMs = ping.pingMs ?? null;
+      latencyMs = ping.latencyMs;
+      if (!ping.ok) {
+        ok = false;
+        error = ping.error || error;
+      }
+    }
+
     const check = await prisma.healthCheck.create({
       data: {
         proxyId: proxy.id,
@@ -630,9 +771,11 @@ class ProxyService {
         lastLatencyMs: ok ? latencyMs : null,
         status: showRunning ? 'running' : (proxy.enabled ? 'error' : 'stopped'),
         statusMessage: ok
-          ? (exitIp
-            ? `healthy ${latencyMs}ms · egress ${exitIp}`
-            : `container healthy ${latencyMs}ms`)
+          ? (pingMs != null
+            ? `ping ${pingMs}ms · egress ${exitIp}`
+            : exitIp
+              ? `healthy · egress ${exitIp}`
+              : `container healthy`)
           : containerOk
             ? `container OK · egress ${proxy.publicIp}:${proxy.extHttpPort}`
             : `unhealthy: ${error?.slice(0, 180) || 'unknown'}`,
@@ -641,10 +784,10 @@ class ProxyService {
 
     realtimeHub.broadcast({
       type: 'proxy.health',
-      payload: { id, ok, latencyMs, exitIp, error },
+      payload: { id, ok, latencyMs, pingMs, exitIp, error, pppoeIdx: proxy.pppoeIdx },
     });
 
-    return { ok, latencyMs, exitIp, error };
+    return { ok, latencyMs, pingMs, exitIp, error };
   }
 
   // ============ MIKROTIK OPERATIONS ============
@@ -654,9 +797,9 @@ class ProxyService {
    * (veth, routing, NAT, container, start). Dùng lại cho cả
    * create-flow và auto-apply sau khi enable PPPoE từ WebUI.
    */
-  async ensureApplied(proxyId: number): Promise<ProxyUser> {
+  async ensureApplied(proxyId: number, opts?: ApplyProxyOpts): Promise<ProxyUser> {
     return routerQueue.enqueue(async () => {
-      await this.applyToMikrotik(proxyId);
+      await this.applyToMikrotik(proxyId, opts);
       const fresh = await prisma.proxyUser.findUnique({ where: { id: proxyId } });
       if (!fresh) throw new Error('Proxy not found after apply');
       return fresh;
@@ -686,7 +829,7 @@ class ProxyService {
       data: {
         pppoeIdx: parsed.pppoeIdx,
         pppoeName: ports.pppoeName,
-        egressPppoeName: hub ? null : ports.pppoeName,
+        egressPppoeName: ports.pppoeName,
         vethName: hub ? hubVethName(hubShardId(parsed.pppoeIdx)) : ports.vethName,
         vethIp: hub ? `${hubSlotIp(parsed.pppoeIdx)}/32` : ports.vethIp,
         gatewayIp: hub ? `${hubShardGw(hubShardId(parsed.pppoeIdx))}/24` : ports.gatewayIp,
@@ -707,9 +850,13 @@ class ProxyService {
 
     realtimeHub.broadcast({ type: 'proxy.created', payload: { id: proxy.id, pppoeIdx: proxy.pppoeIdx } });
 
+    const applyOpts: ApplyProxyOpts | undefined = input.wanIp !== undefined
+      ? { wanIp: input.wanIp }
+      : undefined;
+
     return routerQueue.enqueue(async () => {
       try {
-        await this.applyToMikrotik(proxy.id);
+        await this.applyToMikrotik(proxy.id, applyOpts);
         const fresh = await prisma.proxyUser.findUnique({ where: { id: proxy.id } });
         if (!fresh) throw new Error('Proxy not found after apply');
         if (fresh.status === 'error') {
@@ -729,12 +876,12 @@ class ProxyService {
     });
   }
 
-  private async applyToMikrotik(proxyId: number) {
+  private async applyToMikrotik(proxyId: number, opts?: ApplyProxyOpts) {
     const proxy = await prisma.proxyUser.findUnique({ where: { id: proxyId } });
     if (!proxy) throw new Error('Proxy not found');
 
     if (isHubMode()) {
-      const { publicIp } = await hubProxyService.applyHubProxy(proxyId);
+      const { publicIp } = await hubProxyService.applyHubProxy(proxyId, { wanIp: opts?.wanIp });
       if (publicIp && publicIp !== proxy.publicIp) {
         await prisma.ipHistory.create({
           data: { proxyId: proxy.id, oldIp: proxy.publicIp, newIp: publicIp, source: 'sync' },
@@ -1129,8 +1276,18 @@ class ProxyService {
     await mik.restPost('/rest/container/stop', { id: c.id });
   }
 
-  async updateSrcnatIp(idx: number, newIp: string) {
+  /** Hub: cập nhật srcnat theo slot idx. Legacy: theo pppoe-out idx. */
+  async updateSrcnatIp(idx: number, newIp: string, egressName?: string) {
     const mik = getMikrotikService();
+    if (isHubMode() && egressName) {
+      try {
+        await hubProxyService.finalizeHubSlotIp(idx, egressName, newIp);
+        return;
+      } catch (e: unknown) {
+        const msg = e instanceof Error ? e.message : String(e);
+        logger.warn({ err: msg, idx, egressName, newIp }, 'updateSrcnatIp hub finalize failed');
+      }
+    }
     const ifName = `pppoe-out${idx}`;
     const comment = isHubMode() ? hubSrcnatComment(idx) : `ctn-${ifName}`;
     try {
@@ -1143,6 +1300,8 @@ class ProxyService {
   }
 
   async updateDstnatIp(idx: number, newIp: string) {
+    // Hub: dst-nat theo in-interface egress, không theo dst-address PPPoE IP
+    if (isHubMode()) return;
     // dst-nat uses Mikrotik WAN IP, not PPPoE IP, so no update needed
     // (dst-nat rules are matched on interface, not dst-address)
     // But for completeness, we could update dst-address if it was set to PPPoE IP

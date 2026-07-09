@@ -41,15 +41,22 @@ echo "============================================================"
 
 # ============ STEP 1: Build Docker image (linux/amd64) ============
 echo ""
-echo "=== STEP 1: Build Docker image (linux/amd64) ==="
-docker buildx build --platform linux/amd64 -t webuiproxymikrotik:latest --load .
+if [[ "${SKIP_BUILD:-}" == "1" && -f "$TAR_NAME" ]]; then
+  echo "=== STEP 1: SKIP_BUILD=1 — dùng $TAR_NAME có sẵn ($(du -h "$TAR_NAME" | cut -f1)) ==="
+else
+  echo "=== STEP 1: Build Docker image (linux/amd64) ==="
+  docker buildx build --platform linux/amd64 -t webuiproxymikrotik:latest --load .
+fi
 
 # ============ STEP 2: Save to .tar ============
 echo ""
-echo "=== STEP 2: Save image to .tar ==="
-# Xoá file cũ trước (Windows Defender có thể lock)
-rm -f "$TAR_NAME" 2>/dev/null || true
-docker save webuiproxymikrotik:latest > "$TAR_NAME"
+if [[ "${SKIP_BUILD:-}" == "1" && -f "$TAR_NAME" ]]; then
+  echo "=== STEP 2: SKIP_BUILD=1 — bỏ qua docker save ==="
+else
+  echo "=== STEP 2: Save image to .tar ==="
+  rm -f "$TAR_NAME" 2>/dev/null || true
+  docker save webuiproxymikrotik:latest > "$TAR_NAME"
+fi
 TAR_SIZE=$(du -h "$TAR_NAME" | cut -f1)
 echo "  Built: $TAR_NAME ($TAR_SIZE)"
 
@@ -71,15 +78,36 @@ sshpass -p "$MIK_PASS" scp "${SCP_OPTS[@]}" \
 echo ""
 echo "=== STEP 4: Stop + remove old container ==="
 sshpass -p "$MIK_PASS" ssh "${SSH_OPTS[@]}" "$MIK_USER@$MIK_HOST" \
-  ":do {/container/stop [find name=$CONTAINER_NAME]} on-error={}; \
-   :delay 12s; \
-   :do {/container/remove [find name=$CONTAINER_NAME]} on-error={}; \
-   :delay 8s; \
-   :do {/disk/remove [find name=webuiproxymikrotik-root]} on-error={}; \
+  "/container/set [find name=$CONTAINER_NAME] start-on-boot=no" 2>/dev/null || true
+for i in 1 2 3 4 5 6 8 10; do
+  sshpass -p "$MIK_PASS" ssh "${SSH_OPTS[@]}" "$MIK_USER@$MIK_HOST" \
+    "/container/stop [find name=$CONTAINER_NAME]" 2>/dev/null || true
+  sleep "$i"
+  STILL=$(sshpass -p "$MIK_PASS" ssh "${SSH_OPTS[@]}" "$MIK_USER@$MIK_HOST" \
+    "/container/print where name=$CONTAINER_NAME" 2>/dev/null | grep -c ' R ' || true)
+  echo "  stop attempt $i: running=$STILL"
+  if [[ "$STILL" == "0" ]]; then break; fi
+done
+sshpass -p "$MIK_PASS" ssh "${SSH_OPTS[@]}" "$MIK_USER@$MIK_HOST" \
+  ":do {/container/remove [find name=$CONTAINER_NAME]} on-error={}; \
    :delay 5s; \
-   :do {/file/remove [find name=webuiproxymikrotik-root]} on-error={}; \
-   :delay 3s; \
-   :if ([:len [/container/find where name=$CONTAINER_NAME]] > 0) do={:log warning \"container still exists after remove\"}"
+   :do {/disk/remove [find name=webuiproxymikrotik-root]} on-error={}; \
+   :do {/file/remove [find name=webuiproxymikrotik-root]} on-error={}"
+REMAIN=$(sshpass -p "$MIK_PASS" ssh "${SSH_OPTS[@]}" "$MIK_USER@$MIK_HOST" \
+  "/container/print where name=$CONTAINER_NAME" 2>/dev/null | grep -c "$CONTAINER_NAME" || true)
+if [[ "$REMAIN" != "0" ]]; then
+  echo "  WARN: container still exists — retry remove after REST stop"
+  CID=$(curl -s -u "$MIK_USER:$MIK_PASS" "http://$MIK_HOST/rest/container?name=$CONTAINER_NAME" \
+    | python3 -c "import sys,json; r=json.load(sys.stdin); print(r[0]['.id'] if r else '')" 2>/dev/null || true)
+  if [[ -n "$CID" ]]; then
+    curl -s -X POST -u "$MIK_USER:$MIK_PASS" -H 'Content-Type: application/json' \
+      -d "{\".id\":\"$CID\"}" "http://$MIK_HOST/rest/container/stop" >/dev/null || true
+    sleep 15
+    curl -s -X POST -u "$MIK_USER:$MIK_PASS" -H 'Content-Type: application/json' \
+      -d "{\".id\":\"$CID\"}" "http://$MIK_HOST/rest/container/remove" >/dev/null || true
+    sleep 5
+  fi
+fi
 
 # ============ STEP 5: Ensure mount list ============
 echo ""
@@ -91,7 +119,7 @@ sshpass -p "$MIK_PASS" ssh "${SSH_OPTS[@]}" "$MIK_USER@$MIK_HOST" \
 # ============ STEP 6: Create container với env mới ============
 echo ""
 echo "=== STEP 6: Create container ==="
-ENV_STR="NODE_ENV=production,PORT=8088,DEPLOY_TARGET=router,MIKROTIK_HOST=172.17.0.1,MIKROTIK_API_USER=$MIK_USER,MIKROTIK_API_PASS=$MIK_PASS,MIKROTIK_REST_PORT=80,MIKROTIK_REST_SCHEME=http,MIKROTIK_SSH_PORT=$SSH_PORT,MIKROTIK_SSH_USER=$MIK_USER,MIKROTIK_SSH_PASS=$MIK_PASS,MIKROTIK_WAN_IP=$WAN_IP,MIKROTIK_WAN_HOST=ntpcproxy.duckdns.org,JWT_SECRET=$JWT_SECRET,ADMIN_USERNAME=admin,ADMIN_PASSWORD=$ADMIN_PASS,DATABASE_URL=file:/data/proxy.db,THREEPROXY_IMAGE=ghcr.io/tarampampam/3proxy:2,THREEPROXY_TARBALL=disk1/3proxy.tar,THREEPROXY_HUB_IMAGE=webuiproxymikrotik/3proxy-hub:2,THREEPROXY_HUB_TARBALL=disk1/3proxy-hub.tar,PROXY_DEPLOY_MODE=hub,HUB_SHARD_SIZE=50,HUB_SHARD_COUNT=6,HUB_MAX_PPPOE_OUT=300,LOW_CPU_MODE=true,HUB_REQUEST_LOG=false,LOGS_TAIL_ENABLED=false,METRICS_ENABLED=false,CONTAINER_LOGGING=false,LOG_LEVEL=warn,HUB_FAST_IP_PEEK_MS=0,HUB_RELOAD_DEBOUNCE_MS=2500,HUB_NSCACHE=8192,HEALTH_CHECK_INTERVAL_MS=120000,HEALTH_CHECK_TIMEOUT_MS=10000,AUTO_PROXY_POLL_MS=45000,MIKROTIK_REST_CACHE_MS=8000,ENABLE_REALTIME=true"
+ENV_STR="NODE_ENV=production,PORT=8088,DEPLOY_TARGET=router,MIKROTIK_HOST=172.17.0.1,MIKROTIK_API_USER=$MIK_USER,MIKROTIK_API_PASS=$MIK_PASS,MIKROTIK_REST_PORT=80,MIKROTIK_REST_SCHEME=http,MIKROTIK_SSH_PORT=$SSH_PORT,MIKROTIK_SSH_USER=$MIK_USER,MIKROTIK_SSH_PASS=$MIK_PASS,MIKROTIK_WAN_IP=$WAN_IP,MIKROTIK_WAN_HOST=ntpcproxy.duckdns.org,JWT_SECRET=$JWT_SECRET,ADMIN_USERNAME=admin,ADMIN_PASSWORD=$ADMIN_PASS,DATABASE_URL=file:/data/proxy.db,THREEPROXY_IMAGE=ghcr.io/tarampampam/3proxy:2,THREEPROXY_TARBALL=disk1/3proxy.tar,THREEPROXY_HUB_IMAGE=webuiproxymikrotik/3proxy-hub:2,THREEPROXY_HUB_TARBALL=disk1/3proxy-hub.tar,PROXY_DEPLOY_MODE=hub,HUB_SHARD_SIZE=50,HUB_SHARD_COUNT=6,HUB_MAX_PPPOE_OUT=300,LOW_CPU_MODE=true,HUB_REQUEST_LOG=true,LOGS_TAIL_ENABLED=true,METRICS_ENABLED=true,LOGS_TAIL_MS=10000,METRICS_POLL_MS=10000,CONTAINER_LOGGING=false,LOG_LEVEL=warn,HUB_FAST_IP_PEEK_MS=0,HUB_APPLY_FLUSH_MS=600,HUB_RELOAD_DEBOUNCE_MS=2500,FIREWALL_RECONCILE_ENABLED=true,FIREWALL_RECONCILE_INTERVAL_MS=1800000,FIREWALL_RECONCILE_MAX_SLOTS=15,HUB_NSCACHE=8192,HEALTH_CHECK_INTERVAL_MS=120000,HEALTH_CHECK_TIMEOUT_MS=10000,AUTO_PROXY_POLL_MS=45000,MIKROTIK_REST_CACHE_MS=8000,ENABLE_REALTIME=true"
 
 # Escape ký tự đặc biệt cho RouterOS CLI
 ENV_ESC=$(echo "$ENV_STR" | sed 's/"/\\"/g')

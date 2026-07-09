@@ -7,6 +7,7 @@ import { realtimeHub } from '../../realtime/hub';
 import { counterNumbers } from '../../lib/hubLimitUtils';
 import { threeProxyAdminClient } from './ThreeProxyAdminClient';
 import { deriveLogMetrics, type LogDerivedMetrics } from './LogMetricsDeriver';
+import { getPppoeIfaceBps, isRouterTrafficSampleLive, registerTrafficSampleHook } from './RouterTrafficService';
 
 const POLL_MS = config.metrics.pollIntervalMs;
 const FLUSH_MS = parseInt(process.env.METRICS_FLUSH_MS || '30000', 10);
@@ -21,6 +22,7 @@ interface ByteSnapshot {
 }
 
 let timer: ReturnType<typeof setInterval> | null = null;
+
 let flushTimer: ReturnType<typeof setInterval> | null = null;
 let metricsPollPending: ReturnType<typeof setTimeout> | null = null;
 const prevBytes = new Map<string, ByteSnapshot>();
@@ -33,7 +35,7 @@ const lastLive = new Map<number, {
   usedBytes: string;
   quotaPct: number | null;
   sampledAt: string;
-  source: 'admin' | 'logs';
+  source: 'admin' | 'logs' | 'interface';
 }>();
 const pendingSamples: Array<{
   proxyId: number;
@@ -303,10 +305,24 @@ async function retentionJob(): Promise<void> {
   }
 }
 
+let collectorStarted = false;
+
 export function startProxyMetricsCollector(): void {
   if (config.deployTarget !== 'router') return;
+  if (collectorStarted) return;
+  collectorStarted = true;
+
+  if (config.metrics.pppoeIface) {
+    registerTrafficSampleHook(() => {
+      publishIfaceMetrics().catch(e => logger.warn({ err: e.message }, 'iface metrics publish error'));
+    });
+  }
+
   if (!config.metrics.enabled) {
-    logger.info('ProxyMetricsCollector disabled (METRICS_ENABLED=false / LOW_CPU_MODE)');
+    logger.info({
+      ifaceOnly: config.metrics.pppoeIface,
+      sync: 'router-traffic-sample-hook',
+    }, 'ProxyMetricsCollector log-mode off (METRICS_ENABLED=false)');
     return;
   }
   if (timer) return;
@@ -332,6 +348,7 @@ export function stopProxyMetricsCollector(): void {
   if (flushTimer) clearInterval(flushTimer);
   timer = null;
   flushTimer = null;
+  collectorStarted = false;
 }
 
 type LiveMetricsRow = {
@@ -343,9 +360,52 @@ type LiveMetricsRow = {
   txBytes: string;
   usedBytes: string;
   quotaPct: number | null;
-  source: 'admin' | 'logs';
+  source: 'admin' | 'logs' | 'interface';
   sampledAt: string;
 };
+
+function overlayIfaceTraffic(row: LiveMetricsRow, pppoeIdx: number): LiveMetricsRow {
+  if (!config.metrics.pppoeIface) return row;
+  const iface = getPppoeIfaceBps(pppoeIdx);
+  if (!iface.live && iface.rxBps <= 0 && iface.txBps <= 0) return row;
+  return {
+    ...row,
+    rxBps: Math.max(row.rxBps, iface.rxBps),
+    txBps: Math.max(row.txBps, iface.txBps),
+    source: 'interface',
+    sampledAt: new Date().toISOString(),
+  };
+}
+
+/** Đẩy WS ngay sau khi RouterTrafficService đọc counter MikroTik (cùng tick). */
+export async function publishIfaceMetrics(): Promise<void> {
+  if (!config.metrics.pppoeIface || !isRouterTrafficSampleLive()) return;
+
+  const proxies = await prisma.proxyUser.findMany({
+    where: { enabled: true },
+    select: { id: true, pppoeIdx: true },
+    orderBy: { pppoeIdx: 'asc' },
+  });
+  const now = new Date().toISOString();
+  for (const proxy of proxies) {
+    const iface = getPppoeIfaceBps(proxy.pppoeIdx);
+    const base = lastLive.get(proxy.id);
+    const ev: LiveMetricsRow = {
+      proxyId: proxy.id,
+      clients: base?.clients ?? 0,
+      rxBps: iface.live ? iface.rxBps : 0,
+      txBps: iface.live ? iface.txBps : 0,
+      rxBytes: base?.rxBytes ?? '0',
+      txBytes: base?.txBytes ?? '0',
+      usedBytes: base?.usedBytes ?? '0',
+      quotaPct: base?.quotaPct ?? null,
+      source: 'interface',
+      sampledAt: now,
+    };
+    lastLive.set(proxy.id, ev);
+    realtimeHub.broadcast({ type: 'proxy.metrics', payload: ev });
+  }
+}
 
 function mergeLogIntoLive(proxyId: number, cached: Omit<LiveMetricsRow, 'proxyId'> | undefined, log?: LogDerivedMetrics): LiveMetricsRow {
   const now = new Date().toISOString();
@@ -436,15 +496,18 @@ export async function getLiveMetrics(proxyId: number): Promise<LiveMetricsRow> {
   };
 }
 
-/** All enabled proxies — for Proxies table bulk load. */
+/** All proxies — for Proxies table bulk load (includes stopped rows with zero traffic). */
 export async function getAllLiveMetrics(): Promise<LiveMetricsRow[]> {
   const proxies = await prisma.proxyUser.findMany({
-    where: { enabled: true },
-    select: { id: true },
+    select: { id: true, pppoeIdx: true },
+    orderBy: { pppoeIdx: 'asc' },
   });
   const ids = proxies.map(p => p.id);
   const logMap = await deriveLogMetrics(ids);
-  return ids.map(id => mergeLogIntoLive(id, lastLive.get(id), logMap.get(id)));
+  return proxies.map(({ id, pppoeIdx }) => overlayIfaceTraffic(
+    mergeLogIntoLive(id, lastLive.get(id), logMap.get(id)),
+    pppoeIdx,
+  ));
 }
 
 /** Push metrics immediately after new request logs (realtime WS). */

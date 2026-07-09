@@ -4,14 +4,14 @@ import {
 import {
   ApiOutlined, CheckCircleOutlined, DownloadOutlined, ImportOutlined,
   KeyOutlined, MoreOutlined, PauseCircleOutlined, PlusOutlined,
-  ReloadOutlined, WarningOutlined, FileTextOutlined, GlobalOutlined, EyeOutlined, CopyOutlined,
+  ReloadOutlined, WarningOutlined, FileTextOutlined, GlobalOutlined, CopyOutlined,
 } from '@ant-design/icons';
 import ProxyPageShell from '../proxy/ProxyPageShell';
 import ProxyStatsRow from '../proxy/ProxyStatsRow';
 import ProxyToolbar from '../ui/ProxyToolbar';
 import AppDrawer from '../ui/AppDrawer';
 import { DrawerSection, DrawerKv, DrawerKvGrid, DrawerStatusBand } from '../ui/DrawerSection';
-import ProxyEndpoint from '../ProxyEndpoint';
+import ProxyConnectionDrawer from './ProxyConnectionDrawer';
 import ContainerStatusTag from '../ContainerStatusTag';
 import ProxiesDataTable from './ProxiesDataTable';
 import ProxyModals from './ProxyModals';
@@ -19,6 +19,7 @@ import ProxyAnalyticsDrawer from './ProxyAnalyticsDrawer';
 import ProxyTrafficMini from './ProxyTrafficMini';
 
 import type { ProxiesPageViewProps } from '../../hooks/useProxiesPage';
+import { effectiveLatencyMs } from '../../lib/proxyLatency';
 
 const { Text } = Typography;
 
@@ -43,6 +44,8 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
     filtered,
     focusTarget,
     setFocusTarget,
+    connectionTarget,
+    setConnectionTarget,
     tablePagination,
     metricsMap,
     wanByIdx,
@@ -198,6 +201,7 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
             onLogs={showLogs}
             onEdit={openEdit}
             onRevealPassword={revealPassword}
+            onOpenConnection={setConnectionTarget}
           emptyNode={emptyNode}
         />
       </Card>
@@ -230,71 +234,20 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
               <Tag bordered={false}>{detail.username}</Tag>
             </DrawerStatusBand>
 
-            <DrawerSection title="Endpoints">
-              <Flex vertical gap={12}>
-                {detail.proxyType !== 'socks5' && (
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>HTTP</Text>
-                    <div style={{ marginTop: 6 }}>
-                      <ProxyEndpoint row={{
-                        publicIp: detail.publicIp,
-                        pppoeIdx: detail.pppoeIdx,
-                        index: detail.pppoeIdx,
-                        username: detail.username,
-                        password: detail.password,
-                        extHttpPort: detail.extHttpPort,
-                        extSocksPort: detail.extSocksPort,
-                        proxyType: detail.proxyType,
-                      }} kind="http" onCopy={copyToClipboard} proxyId={detail.id} revealPassword={revealPassword} />
-                    </div>
-                  </div>
-                )}
-                {detail.proxyType !== 'http' && (
-                  <div>
-                    <Text type="secondary" style={{ fontSize: 12 }}>SOCKS5</Text>
-                    <div style={{ marginTop: 6 }}>
-                      <ProxyEndpoint row={{
-                        publicIp: detail.publicIp,
-                        pppoeIdx: detail.pppoeIdx,
-                        index: detail.pppoeIdx,
-                        username: detail.username,
-                        password: detail.password,
-                        extHttpPort: detail.extHttpPort,
-                        extSocksPort: detail.extSocksPort,
-                        proxyType: detail.proxyType,
-                      }} kind="socks5" onCopy={copyToClipboard} proxyId={detail.id} revealPassword={revealPassword} />
-                    </div>
-                  </div>
-                )}
-              </Flex>
-            </DrawerSection>
-
-            <DrawerSection title="Đăng nhập">
-              <Space>
-                <Text code>{detail.username}</Text>
+            <DrawerSection title="Kết nối client">
+              <Space direction="vertical" size={12} style={{ width: '100%' }}>
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  IP public: <Text code>{detail.publicIp || 'Chưa có'}</Text>
+                  {detail.proxyType !== 'socks5' && detail.extHttpPort ? ` · HTTP :${detail.extHttpPort}` : ''}
+                  {detail.proxyType !== 'http' && detail.extSocksPort ? ` · SOCKS :${detail.extSocksPort}` : ''}
+                </Text>
                 <Button
-                  size="small"
-                  icon={<EyeOutlined />}
-                  onClick={async () => {
-                    try {
-                      const pw = await revealPassword(detail.id);
-                      copyToClipboard(pw, 'Đã copy password');
-                    } catch { /* upstream */ }
-                  }}
-                >
-                  Password
-                </Button>
-                <Button
-                  size="small"
+                  type="primary"
                   icon={<CopyOutlined />}
-                  onClick={async () => {
-                    try {
-                      const pw = await revealPassword(detail.id);
-                      copyToClipboard(`${detail.username}:${pw}`, 'Đã copy user:pass');
-                    } catch { /* upstream */ }
-                  }}
+                  block
+                  onClick={() => setConnectionTarget(detail)}
                 >
-                  user:pass
+                  Mở Connection URL
                 </Button>
               </Space>
             </DrawerSection>
@@ -318,7 +271,10 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
                   {detailWan?.uptime || '—'}
                 </DrawerKv>
                 <DrawerKv label="Latency">
-                  {detail.lastLatencyMs ? `${detail.lastLatencyMs} ms` : '—'}
+                  {(() => {
+                    const ms = effectiveLatencyMs(detail, detailWan);
+                    return ms != null ? `${ms} ms` : '—';
+                  })()}
                 </DrawerKv>
                 <DrawerKv label="HTTP port">
                   {detail.extHttpPort ? `:${detail.extHttpPort}` : '—'}
@@ -341,6 +297,14 @@ export default function ProxiesPageView(vm: ProxiesPageViewProps) {
           </>
         )}
       </AppDrawer>
+
+      <ProxyConnectionDrawer
+        proxy={connectionTarget}
+        open={!!connectionTarget}
+        onClose={() => setConnectionTarget(null)}
+        onCopy={copyToClipboard}
+        revealPassword={revealPassword}
+      />
 
       <AppDrawer
         open={!!logsTarget}

@@ -1,0 +1,22 @@
+﻿# Ignore heavy/unnecessary files for Docker build context
+node_modules
+**/node_modules
+backend/dist
+# frontend/dist + frontend-mobile/dist required for Docker COPY (pre-built on host)
+*.tar
+*.docker.tar
+terminals/
+tmp/
+*.log
+setup-report.json
+router-access.json
+*.db
+backend/data/
+frontend-mobile/node_modules
+frontend/node_modules
+.git
+.gitignore
+.vscode
+.idea
+.DS_Store
+Thumbs.db

@@ -85,16 +85,23 @@ export const config = {
     timeoutMs: parseInt(process.env.HEALTH_CHECK_TIMEOUT_MS || '30000', 10),
     /** WanWatcher đã sync WAN — HealthMonitor không poll PPPoE trùng trên router */
     skipWanSyncOnRouter: process.env.HEALTH_SKIP_WAN_SYNC !== 'false',
+    /** Ping tự động qua PPPoE (batch round-robin) */
+    pingEnabled: process.env.PROXY_PING_ENABLED !== 'false',
+    pingIntervalMs: parseInt(
+      process.env.PROXY_PING_INTERVAL_MS || (process.env.LOW_CPU_MODE === 'true' ? '45000' : '30000'),
+      10,
+    ),
+    pingBatchSize: parseInt(process.env.HEALTH_PING_BATCH_SIZE || '6', 10),
   },
 
   logs: {
-    /** 3proxy hub ghi request log (disk I/O + SSH tail) — tắt để giảm CPU */
+    /** 3proxy hub ghi request log (disk I/O + SSH tail) — tắt mặc định khi LOW_CPU, bật bằng HUB_REQUEST_LOG=true */
     hubRequestLog: process.env.LOW_CPU_MODE === 'true'
-      ? false
+      ? process.env.HUB_REQUEST_LOG === 'true'
       : process.env.HUB_REQUEST_LOG !== 'false',
-    /** WebUI tail log hub qua /container/shell (SSH mỗi 2s) */
+    /** WebUI tail log hub qua /container/shell — LOW_CPU: bật bằng LOGS_TAIL_ENABLED=true */
     tailEnabled: process.env.LOW_CPU_MODE === 'true'
-      ? false
+      ? process.env.LOGS_TAIL_ENABLED === 'true'
       : process.env.LOGS_TAIL_ENABLED !== 'false',
     tailIntervalMs: parseInt(
       process.env.LOGS_TAIL_MS || (process.env.LOW_CPU_MODE === 'true' ? '15000' : '2000'),
@@ -116,6 +123,8 @@ export const config = {
     enabled: process.env.LOW_CPU_MODE === 'true'
       ? process.env.METRICS_ENABLED === 'true'
       : process.env.METRICS_ENABLED !== 'false',
+    /** Bps từ counter interface PPPoE trên MikroTik (khớp Winbox/REST hơn log 3proxy) */
+    pppoeIface: process.env.METRICS_PPPOE_IFACE !== 'false',
   },
 
   wan: {
@@ -169,6 +178,8 @@ export const config = {
     fastIpPeekMs: parseInt(process.env.HUB_FAST_IP_PEEK_MS || '0', 10),
     /** Gộp sync cfg + SIGUSR1 reload — giảm CPU khi tạo hàng loạt */
     reloadDebounceMs: parseInt(process.env.HUB_RELOAD_DEBOUNCE_MS || '2500', 10),
+    /** Sync cfg + reload 3proxy sau apply — thấp hơn reloadDebounce khi tạo đơn lẻ */
+    applyFlushMs: parseInt(process.env.HUB_APPLY_FLUSH_MS || '600', 10),
     /** Repair toàn bộ slot sau mỗi create — tắt mặc định (tốn CPU O(n)) */
     repairAllOnApply: process.env.HUB_REPAIR_ALL_ON_APPLY === 'true',
     /** Tự apply rate-limit firewall sau tạo/sửa proxy — tắt bằng HUB_RATE_LIMIT_ON_APPLY=false */
@@ -177,6 +188,19 @@ export const config = {
       process.env.HUB_RATE_LIMIT_DEBOUNCE_MS || process.env.HUB_RELOAD_DEBOUNCE_MS || '2500',
       10,
     ),
+  },
+
+  firewallReconcile: {
+    /** Tự audit/dọn/repair firewall hub — LOW_CPU: bật bằng FIREWALL_RECONCILE_ENABLED=true */
+    enabled: process.env.LOW_CPU_MODE === 'true'
+      ? process.env.FIREWALL_RECONCILE_ENABLED === 'true'
+      : process.env.FIREWALL_RECONCILE_ENABLED !== 'false',
+    intervalMs: parseInt(
+      process.env.FIREWALL_RECONCILE_INTERVAL_MS || (process.env.LOW_CPU_MODE === 'true' ? '1800000' : '900000'),
+      10,
+    ),
+    maxSlotsPerPass: parseInt(process.env.FIREWALL_RECONCILE_MAX_SLOTS || '15', 10),
+    onBoot: process.env.FIREWALL_RECONCILE_ON_BOOT === 'true',
   },
 
   autoProxy: {

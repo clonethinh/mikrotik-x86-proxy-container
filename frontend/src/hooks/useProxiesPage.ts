@@ -4,6 +4,7 @@ import { api, type ProxyUser, type WanInfo } from '../services/api';
 import { useWSEvent } from '../services/ws';
 import { useTablePagination } from './useTablePagination';
 import { copyText } from '../lib/clipboard';
+import { mergeLiveMetrics } from '../lib/liveMetricsMerge';
 import dayjs from 'dayjs';
 import {
   PROXY_LIST_RELOAD,
@@ -58,6 +59,7 @@ export function useProxiesPage() {
   const [requestLogsLoading, setRequestLogsLoading] = useState(false);
   const [logHostFilter, setLogHostFilter] = useState('');
   const [focusTarget, setFocusTarget] = useState<ProxyUser | null>(null);
+  const [connectionTarget, setConnectionTarget] = useState<ProxyUser | null>(null);
 
   const loadMetrics = async () => {
     try {
@@ -92,30 +94,7 @@ export function useProxiesPage() {
   useEffect(() => { load(); }, []);
 
   useEffect(() => {
-    const t = setInterval(() => {
-      setMetricsMap(prev => {
-        let changed = false;
-        const next: Record<number, LiveMetrics> = { ...prev };
-        for (const [id, m] of Object.entries(prev)) {
-          if ((m.rxBps ?? 0) <= 0 && (m.txBps ?? 0) <= 0) continue;
-          next[+id] = {
-            ...m,
-            rxBps: Math.round((m.rxBps ?? 0) * 0.9),
-            txBps: Math.round((m.txBps ?? 0) * 0.9),
-          };
-          changed = true;
-        }
-        return changed ? next : prev;
-      });
-      setAnalyticsLive(prev => {
-        if (!prev || ((prev.rxBps ?? 0) <= 0 && (prev.txBps ?? 0) <= 0)) return prev;
-        return {
-          ...prev,
-          rxBps: Math.round((prev.rxBps ?? 0) * 0.9),
-          txBps: Math.round((prev.txBps ?? 0) * 0.9),
-        };
-      });
-    }, 1000);
+    const t = setInterval(() => { loadMetrics(); }, 5_000);
     return () => clearInterval(t);
   }, []);
 
@@ -124,26 +103,23 @@ export function useProxiesPage() {
     () => load(),
   );
 
+  const patchMetrics = (proxyId: number, patch: Partial<LiveMetrics>) => {
+    setMetricsMap(prev => ({
+      ...prev,
+      [proxyId]: mergeLiveMetrics(prev[proxyId], patch),
+    }));
+    if (analyticsTarget?.id === proxyId) {
+      setAnalyticsLive(prev => mergeLiveMetrics(prev ?? undefined, patch));
+    }
+  };
+
   useWSEvent(
     (msg) => msg.type === 'proxy.metrics',
     (msg) => {
       const p = msg.payload as { proxyId: number } & Partial<LiveMetrics>;
       if (!p?.proxyId) return;
-      const merge = (cur?: LiveMetrics): LiveMetrics => ({
-        clients: p.clients ?? cur?.clients ?? 0,
-        rxBps: p.rxBps ?? cur?.rxBps ?? 0,
-        txBps: p.txBps ?? cur?.txBps ?? 0,
-        rxBytes: p.rxBytes ?? cur?.rxBytes ?? '0',
-        txBytes: p.txBytes ?? cur?.txBytes ?? '0',
-        usedBytes: p.usedBytes ?? cur?.usedBytes,
-        quotaPct: p.quotaPct ?? cur?.quotaPct ?? null,
-        source: p.source ?? cur?.source ?? 'logs',
-        sampledAt: p.sampledAt ?? new Date().toISOString(),
-      });
-      setMetricsMap(prev => ({ ...prev, [p.proxyId]: merge(prev[p.proxyId]) }));
-      if (analyticsTarget?.id === p.proxyId) {
-        setAnalyticsLive(prev => merge(prev ?? undefined));
-      }
+      const { proxyId, ...patch } = p;
+      patchMetrics(proxyId, { ...patch, sampledAt: patch.sampledAt ?? new Date().toISOString() });
     },
   );
 
@@ -165,43 +141,59 @@ export function useProxiesPage() {
       const durMs = Math.max(200, p.durationMs || 1000);
       const snapRxBps = p.rxBps ?? Math.round(rx * 1000 / durMs);
       const snapTxBps = p.txBps ?? Math.round(tx * 1000 / durMs);
-      const livePatch: LiveMetrics = {
-        clients: 0,
+      const hasClient = !!(p.clientIp && p.clientIp !== '-' && p.clientIp !== '0.0.0.0');
+      patchMetrics(p.proxyId, {
         rxBps: snapRxBps,
         txBps: snapTxBps,
-        rxBytes: '0',
-        txBytes: '0',
-        usedBytes: '0',
-        quotaPct: null,
+        rxBytes: String(rx),
+        txBytes: String(tx),
+        clients: hasClient ? 1 : undefined,
         source: 'logs',
         sampledAt: new Date().toISOString(),
-      };
-      setMetricsMap(prev => {
-        const cur = prev[p.proxyId];
-        const used = BigInt(cur?.usedBytes || '0') + BigInt(rx) + BigInt(tx);
-        const hasClient = !!(p.clientIp && p.clientIp !== '-' && p.clientIp !== '0.0.0.0');
-        livePatch.clients = Math.max(cur?.clients ?? 0, hasClient ? 1 : 0);
-        livePatch.rxBps = snapRxBps;
-        livePatch.txBps = snapTxBps;
-        livePatch.usedBytes = used.toString();
-        livePatch.quotaPct = cur?.quotaPct ?? null;
-        return { ...prev, [p.proxyId]: { ...cur, ...livePatch } as LiveMetrics };
       });
-      if (analyticsTarget?.id === p.proxyId) {
-        setAnalyticsLive(prev => {
-          const cur = prev || livePatch;
-          const used = BigInt(cur.usedBytes || '0') + BigInt(rx) + BigInt(tx);
-          const hasClient = !!(p.clientIp && p.clientIp !== '-' && p.clientIp !== '0.0.0.0');
-          return {
-            ...cur,
-            clients: Math.max(cur.clients ?? 0, hasClient ? 1 : 0),
-            rxBps: snapRxBps,
-            txBps: snapTxBps,
-            usedBytes: used.toString(),
-            source: 'logs',
-            sampledAt: new Date().toISOString(),
-          };
-        });
+    },
+  );
+
+  useWSEvent(
+    (msg) => msg.type === 'proxy.health',
+    (msg) => {
+      const p = msg.payload as { id: number; ok: boolean; latencyMs?: number | null; pingMs?: number | null };
+      if (!p?.id) return;
+      const at = new Date().toISOString();
+      const ms = p.pingMs ?? p.latencyMs;
+      setProxies(prev => prev.map(x => (
+        x.id === p.id
+          ? { ...x, lastLatencyMs: p.ok && ms != null ? ms : x.lastLatencyMs, lastCheckAt: at }
+          : x
+      )));
+      setWans(prev => prev.map(w => (
+        w.proxyId === p.id
+          ? { ...w, lastLatencyMs: p.ok && ms != null ? ms : w.lastLatencyMs, lastCheckAt: at }
+          : w
+      )));
+      if (focusTarget?.id === p.id) {
+        setFocusTarget(ft => ft ? { ...ft, lastLatencyMs: p.ok && ms != null ? ms : ft.lastLatencyMs, lastCheckAt: at } : ft);
+      }
+    },
+  );
+
+  useWSEvent(
+    (msg) => msg.type === 'proxy.applied' || msg.type === 'wan.internet-up',
+    (msg) => {
+      const p = msg.payload as { id?: number; proxyId?: number; pingMs?: number | null; pppoeIdx?: number };
+      const pingMs = p.pingMs;
+      if (pingMs == null) return;
+      const proxyId = p.id ?? p.proxyId;
+      const at = new Date().toISOString();
+      if (proxyId) {
+        setProxies(prev => prev.map(x => (
+          x.id === proxyId ? { ...x, lastLatencyMs: pingMs, lastCheckAt: at } : x
+        )));
+      }
+      if (p.pppoeIdx != null) {
+        setWans(prev => prev.map(w => (
+          w.index === p.pppoeIdx ? { ...w, lastLatencyMs: pingMs, lastCheckAt: at } : w
+        )));
       }
     },
   );
@@ -416,8 +408,16 @@ export function useProxiesPage() {
     setBusy(id);
     try {
       const r = await api.post<{ ok: boolean; latencyMs: number; exitIp: string | null; error: string | null }>(`/api/proxies/${id}/test`);
-      if (r.ok) msgApi.success(`Container OK · ${r.latencyMs}ms · egress ${r.exitIp}`);
-      else msgApi.error(r.error || 'Test fail');
+      if (r.ok) {
+        const at = new Date().toISOString();
+        setProxies(prev => prev.map(p => (
+          p.id === id ? { ...p, lastLatencyMs: r.latencyMs, lastCheckAt: at } : p
+        )));
+        setFocusTarget(ft => (ft?.id === id ? { ...ft, lastLatencyMs: r.latencyMs, lastCheckAt: at } : ft));
+        msgApi.success(`Container OK · ${r.latencyMs}ms · egress ${r.exitIp}`);
+      } else {
+        msgApi.error(r.error || 'Test fail');
+      }
     } catch (e: unknown) {
       msgApi.error(e instanceof Error ? e.message : 'Lỗi');
     } finally {
@@ -430,7 +430,7 @@ export function useProxiesPage() {
     setBusy(id);
     try {
       await api.post(`/api/proxies/${id}/restart`);
-      msgApi.success('Đã gửi lệnh restart');
+      msgApi.success('Đã reload config hub (không restart container)');
     } catch (e: unknown) {
       msgApi.error(e instanceof Error ? e.message : 'Lỗi');
     } finally {
@@ -470,6 +470,10 @@ export function useProxiesPage() {
   };
 
   const copyToClipboard = async (text: string, label = 'Đã copy') => {
+    if (!text?.trim()) {
+      msgApi.error(typeof label === 'string' && label.startsWith('Không') ? label : 'Không có nội dung để copy');
+      return;
+    }
     try {
       await copyText(text);
       msgApi.success(label);
@@ -724,6 +728,8 @@ export function useProxiesPage() {
     setLogHostFilter,
     focusTarget,
     setFocusTarget,
+    connectionTarget,
+    setConnectionTarget,
     stats,
     filtered,
     wanByIdx,

@@ -25,6 +25,7 @@ import proxyMetricsRoutes from './routes/proxyMetrics';
 import proxyLogsRoutes from './routes/proxyLogs';
 import wsHandler from './ws/handler';
 import { startHealthMonitor, stopHealthMonitor } from './services/realtime/HealthMonitor';
+import { startProxyPingMonitor, stopProxyPingMonitor } from './services/realtime/ProxyPingMonitor';
 import { startProxyMetricsCollector, stopProxyMetricsCollector } from './services/metrics/ProxyMetricsCollector';
 import { startRollupAggregator, stopRollupAggregator } from './services/metrics/RollupAggregator';
 import { startRouterResourceCollector, stopRouterResourceCollector } from './services/metrics/RouterResourceCollector';
@@ -34,6 +35,7 @@ import { startLogTailer, stopLogTailer } from './services/logs/LogTailer';
 import { startTopDomainAggregator, stopTopDomainAggregator } from './services/logs/TopDomainAggregator';
 import { startClockSyncOnBoot } from './services/system/ClockSyncService';
 import { startWanWatcher, stopWanWatcher } from './services/auto/WanWatcherService';
+import { startFirewallReconcile, stopFirewallReconcile } from './services/mikrotik/FirewallReconcileService';
 import { routerQueue } from './lib/queue';
 
 async function buildServer() {
@@ -76,17 +78,34 @@ async function buildServer() {
 
   // Serve frontend static files (when bundled together)
   const publicDir = path.resolve(__dirname, '../public');
+  const mobileDir = path.join(publicDir, 'mobile');
   if (fs.existsSync(publicDir)) {
     const staticPlugin = require('@fastify/static');
+    // Mobile SPA (HeroUI) — tách biệt desktop, served at /m/
+    if (fs.existsSync(mobileDir)) {
+      await app.register(staticPlugin, {
+        root: mobileDir,
+        prefix: '/m/',
+        decorateReply: false,
+      });
+    }
     await app.register(staticPlugin, {
       root: publicDir,
       prefix: '/',
     });
-    // SPA fallback
+    // Dual SPA fallback: /m/* → mobile index, other GET → desktop index
     app.setNotFoundHandler((req, reply) => {
-      const indexFile = path.join(publicDir, 'index.html');
-      if (fs.existsSync(indexFile) && req.method === 'GET' && !req.url.startsWith('/api')) {
-        return reply.type('text/html').send(fs.createReadStream(indexFile));
+      if (req.method !== 'GET' || req.url.startsWith('/api')) {
+        return reply.code(404).send({ error: 'Not found' });
+      }
+      const isMobile = req.url === '/m' || req.url.startsWith('/m/');
+      const mobileIndex = path.join(mobileDir, 'index.html');
+      const desktopIndex = path.join(publicDir, 'index.html');
+      if (isMobile && fs.existsSync(mobileIndex)) {
+        return reply.type('text/html').send(fs.createReadStream(mobileIndex));
+      }
+      if (fs.existsSync(desktopIndex)) {
+        return reply.type('text/html').send(fs.createReadStream(desktopIndex));
       }
       return reply.code(404).send({ error: 'Not found' });
     });
@@ -165,6 +184,7 @@ async function main() {
     }
 
     startHealthMonitor();
+    startProxyPingMonitor();
     startProxyMetricsCollector();
     startRouterResourceCollector();
     startRouterTrafficCollector();
@@ -210,9 +230,27 @@ async function main() {
         hubProxyService.ensureAllHubShards().catch((e: Error) => {
           logger.warn({ err: e.message }, 'hub veth bootstrap failed');
         });
+        hubProxyService.warmShardCacheFromContainers().catch((e: Error) => {
+          logger.warn({ err: e.message }, 'hub shard cache warm failed');
+        });
         hubProxyService.ensureHubLanAccess().catch((e: Error) => {
           logger.warn({ err: e.message }, 'hub LAN access bootstrap failed');
         });
+        if (config.logs.hubRequestLog) {
+          const { syncHubConfig, listActiveHubShardIds } = await import('./services/proxy/HubConfigService');
+          syncHubConfig()
+            .then(async () => {
+              const shards = await listActiveHubShardIds();
+              for (const sid of shards) {
+                await hubProxyService.reloadHubShard(sid);
+              }
+              logger.info({ shards }, 'hub request-log config synced on boot');
+            })
+            .catch((e: Error) => {
+              logger.warn({ err: e.message }, 'hub request-log sync on boot failed');
+            });
+        }
+        startFirewallReconcile();
       }
     }
 
@@ -251,6 +289,7 @@ async function main() {
     const shutdown = async (signal: string) => {
       logger.info({ signal }, 'shutting down');
       stopHealthMonitor();
+      stopProxyPingMonitor();
       stopProxyMetricsCollector();
       stopRouterResourceCollector();
       stopRouterTrafficCollector();
@@ -259,6 +298,7 @@ async function main() {
       stopLogTailer();
       stopTopDomainAggregator();
       stopWanWatcher();
+      stopFirewallReconcile();
       await app.close();
       await closeDb();
       process.exit(0);

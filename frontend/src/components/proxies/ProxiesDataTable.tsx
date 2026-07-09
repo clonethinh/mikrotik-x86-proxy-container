@@ -13,6 +13,9 @@ import ProxyEndpoint from '../ProxyEndpoint';
 import ContainerStatusTag from '../ContainerStatusTag';
 import { HTTP_PORT_BASE, SOCKS_PORT_BASE } from '../../lib/proxyUtils';
 import { formatBps } from '../../lib/proxiesFormat';
+import { effectiveLatencyMs, isLatencyStale } from '../../lib/proxyLatency';
+import IpQualityTag from '../IpQualityTag';
+import EgressTag from '../EgressTag';
 
 const { Text } = Typography;
 
@@ -41,6 +44,7 @@ interface Props {
   onLogs: (proxy: ProxyUser) => void;
   onEdit: (proxy: ProxyUser) => void;
   onRevealPassword: (id: number) => Promise<string>;
+  onOpenConnection: (proxy: ProxyUser) => void;
   emptyNode: React.ReactNode;
 }
 
@@ -60,21 +64,28 @@ function proxyRow(r: ProxyUser) {
 function TrafficCell({ metrics }: { metrics?: LiveMetrics | null }) {
   if (!metrics) return <Text type="secondary" style={{ fontSize: 12 }}>—</Text>;
   const active = (metrics.rxBps ?? 0) > 0 || (metrics.txBps ?? 0) > 0;
+  const sampledAt = metrics.sampledAt ? Date.parse(metrics.sampledAt) : 0;
+  const fresh = sampledAt > 0 && Date.now() - sampledAt < 30_000;
   return (
-    <Flex vertical gap={2}>
-      <Text style={{ fontSize: 12 }}>
-        <TeamOutlined style={{ marginRight: 4, color: '#8c8c8c' }} />
-        {metrics.clients}
-      </Text>
-      <Text type={active ? undefined : 'secondary'} style={{ fontSize: 11, fontFamily: 'monospace' }}>
-        <ArrowUpOutlined style={{ color: '#52c41a', marginRight: 2 }} />
-        {formatBps(metrics.txBps)}
-      </Text>
-      <Text type={active ? undefined : 'secondary'} style={{ fontSize: 11, fontFamily: 'monospace' }}>
-        <ArrowDownOutlined style={{ color: '#1677ff', marginRight: 2 }} />
-        {formatBps(metrics.rxBps)}
-      </Text>
-    </Flex>
+    <Tooltip title={metrics.sampledAt ? `Cập nhật ${new Date(metrics.sampledAt).toLocaleTimeString()}` : undefined}>
+      <Flex vertical gap={2} onClick={(e) => e.stopPropagation()}>
+        <Text style={{ fontSize: 12 }}>
+          <TeamOutlined style={{ marginRight: 4, color: '#8c8c8c' }} />
+          {metrics.clients}
+        </Text>
+        <Text type={active ? undefined : 'secondary'} style={{ fontSize: 11, fontFamily: 'monospace' }}>
+          <ArrowUpOutlined style={{ color: '#52c41a', marginRight: 2 }} />
+          {formatBps(metrics.txBps)}
+        </Text>
+        <Text type={active ? undefined : 'secondary'} style={{ fontSize: 11, fontFamily: 'monospace' }}>
+          <ArrowDownOutlined style={{ color: '#1677ff', marginRight: 2 }} />
+          {formatBps(metrics.rxBps)}
+        </Text>
+        {!fresh && !active && (
+          <Text type="secondary" style={{ fontSize: 10 }}>idle</Text>
+        )}
+      </Flex>
+    </Tooltip>
   );
 }
 
@@ -96,6 +107,7 @@ export default function ProxiesDataTable({
   onLogs,
   onEdit,
   onRevealPassword,
+  onOpenConnection,
   emptyNode,
 }: Props) {
   const columns = [
@@ -120,15 +132,19 @@ export default function ProxiesDataTable({
       key: 'ip',
       width: 148,
       render: (_: unknown, r: ProxyUser) => (
-        r.publicIp
-          ? (
-            <Tooltip title="Client kết nối qua IP egress của proxy">
+        <Flex vertical gap={4}>
+          {r.publicIp ? (
+            <Tooltip title={r.ipQualityHint || 'Client kết nối qua IP egress của proxy'}>
               <span className="proxy-endpoint-chip proxy-endpoint-chip--http" style={{ padding: '2px 8px', borderRadius: 4 }}>
                 {r.publicIp}
               </span>
             </Tooltip>
-          )
-          : <Text type="secondary">—</Text>
+          ) : <Text type="secondary">—</Text>}
+          <Space size={4} wrap>
+            <IpQualityTag {...r} publicIp={r.publicIp} />
+            <EgressTag pppoeName={r.pppoeName} egressPppoeName={r.egressPppoeName} />
+          </Space>
+        </Flex>
       ),
     },
     {
@@ -171,7 +187,7 @@ export default function ProxiesDataTable({
       width: 108,
       render: (_: unknown, r: ProxyUser) => (
         r.proxyType !== 'socks5'
-          ? <ProxyEndpoint row={proxyRow(r)} kind="http" onCopy={onCopy} proxyId={r.id} revealPassword={onRevealPassword} compact />
+          ? <ProxyEndpoint row={proxyRow(r)} kind="http" onCopy={onCopy} proxyId={r.id} revealPassword={onRevealPassword} compact onOpenConnection={() => onOpenConnection(r)} />
           : <Text type="secondary">—</Text>
       ),
     },
@@ -181,7 +197,7 @@ export default function ProxiesDataTable({
       width: 108,
       render: (_: unknown, r: ProxyUser) => (
         r.proxyType !== 'http'
-          ? <ProxyEndpoint row={proxyRow(r)} kind="socks5" onCopy={onCopy} proxyId={r.id} revealPassword={onRevealPassword} compact />
+          ? <ProxyEndpoint row={proxyRow(r)} kind="socks5" onCopy={onCopy} proxyId={r.id} revealPassword={onRevealPassword} compact onOpenConnection={() => onOpenConnection(r)} />
           : <Text type="secondary">—</Text>
       ),
     },
@@ -203,23 +219,32 @@ export default function ProxiesDataTable({
       title: 'Latency',
       key: 'lat',
       width: 84,
-      render: (_: unknown, r: ProxyUser) => (
-        <Text type={r.lastLatencyMs ? undefined : 'secondary'} style={{ fontSize: 13 }}>
-          {r.lastLatencyMs ? `${r.lastLatencyMs} ms` : '—'}
-        </Text>
-      ),
+      render: (_: unknown, r: ProxyUser) => {
+        const wan = wanByIdx.get(r.pppoeIdx);
+        const ms = effectiveLatencyMs(r, wan);
+        const stale = isLatencyStale(r);
+        return (
+          <Tooltip title={stale && ms != null ? 'Latency cũ — bấm Test để đo lại' : 'Ping WAN / health test'}>
+            <Text type={ms != null ? (stale ? 'secondary' : undefined) : 'secondary'} style={{ fontSize: 13 }}>
+              {ms != null ? `${ms} ms` : '—'}
+            </Text>
+          </Tooltip>
+        );
+      },
     },
     {
       title: 'Bật',
       key: 'toggle',
       width: 72,
       render: (_: unknown, r: ProxyUser) => (
-        <Switch
-          size="small"
-          checked={r.enabled}
-          loading={busyId === r.id}
-          onChange={() => onToggle(r)}
-        />
+        <div onClick={(e) => e.stopPropagation()}>
+          <Switch
+            size="small"
+            checked={r.enabled}
+            loading={busyId === r.id}
+            onChange={() => onToggle(r)}
+          />
+        </div>
       ),
     },
     {
@@ -228,21 +253,22 @@ export default function ProxiesDataTable({
       width: 148,
       fixed: 'right' as const,
       render: (_: unknown, r: ProxyUser) => (
-        <Space size={4}>
+        <Space size={4} onClick={(e) => e.stopPropagation()}>
           <Tooltip title="Test proxy">
             <Button size="small" icon={<ThunderboltOutlined />}
-              loading={busyId === r.id} onClick={() => onTest(r.id)} />
+              loading={busyId === r.id} onClick={(e) => { e.stopPropagation(); onTest(r.id); }} />
           </Tooltip>
           <Tooltip title="Reload IP">
             <Button size="small" icon={<ReloadOutlined />}
-              loading={busyId === r.id} onClick={() => onReloadIp(r.id)} />
+              loading={busyId === r.id} onClick={(e) => { e.stopPropagation(); onReloadIp(r.id); }} />
           </Tooltip>
           <Tooltip title="Analytics">
-            <Button size="small" icon={<BarChartOutlined />} onClick={() => onAnalytics(r)} />
+            <Button size="small" icon={<BarChartOutlined />} onClick={(e) => { e.stopPropagation(); onAnalytics(r); }} />
           </Tooltip>
           <Dropdown menu={{
             items: [
               { key: 'detail', label: 'Chi tiết proxy', onClick: () => onDetail(r) },
+              { key: 'conn', label: 'Connection URL', onClick: () => onOpenConnection(r) },
               { key: 'logs', label: 'Container logs', icon: <FileTextOutlined />, onClick: () => onLogs(r) },
               { key: 'edit', label: 'Sửa proxy', icon: <EditOutlined />, onClick: () => onEdit(r) },
               { type: 'divider' },
@@ -275,7 +301,7 @@ export default function ProxiesDataTable({
               },
             ],
           }}>
-            <Button size="small" icon={<MoreOutlined />} />
+            <Button size="small" icon={<MoreOutlined />} onClick={(e) => e.stopPropagation()} />
           </Dropdown>
         </Space>
       ),
@@ -297,7 +323,13 @@ export default function ProxiesDataTable({
       scroll={{ x: 1480 }}
       locale={{ emptyText: emptyNode }}
       onRow={(r) => ({
-        onClick: () => onDetail(r),
+        onClick: (e) => {
+          const el = e.target as HTMLElement;
+          if (el.closest('button, a, input, textarea, select, label, .ant-switch, .ant-dropdown, .ant-checkbox-wrapper')) {
+            return;
+          }
+          onDetail(r);
+        },
         style: { cursor: 'pointer' },
       })}
     />

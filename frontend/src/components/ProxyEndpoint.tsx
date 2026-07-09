@@ -13,6 +13,8 @@ interface Props {
   proxyId?: number;
   revealPassword?: (id: number) => Promise<string>;
   compact?: boolean;
+  /** Mở drawer connection URL thay vì copy trực tiếp */
+  onOpenConnection?: () => void;
 }
 
 const KIND_META = {
@@ -40,13 +42,15 @@ export default function ProxyEndpoint({
   proxyId,
   revealPassword,
   compact,
+  onOpenConnection,
 }: Props) {
   const [copying, setCopying] = useState(false);
   const ip = row.publicIp;
   const port = kind === 'http' ? row.extHttpPort : row.extSocksPort;
   const meta = KIND_META[kind];
 
-  const handleCopy = async () => {
+  const handleCopy = async (e?: React.MouseEvent) => {
+    e?.stopPropagation();
     if (!ip || !port) return;
     setCopying(true);
     try {
@@ -69,13 +73,17 @@ export default function ProxyEndpoint({
 
   if (compact) {
     return (
-      <Tooltip title="Copy connection URL">
+      <Tooltip title={onOpenConnection ? 'Connection URL' : 'Copy connection URL'}>
         <Button
           size="small"
           type={kind === 'http' ? 'primary' : 'default'}
           icon={<CopyOutlined />}
           loading={copying}
-          onClick={() => void handleCopy()}
+          onClick={(e) => {
+            e.stopPropagation();
+            if (onOpenConnection) onOpenConnection();
+            else void handleCopy(e);
+          }}
           style={
             kind === 'socks5'
               ? { borderColor: '#EB2F96', color: '#C41D7F' }
