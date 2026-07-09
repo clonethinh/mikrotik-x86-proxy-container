@@ -232,6 +232,33 @@ export interface RouterScriptActionResult {
   scripts?: RouterScriptStatus[];
 }
 
+export interface FirewallReconcileStatus {
+  enabled: boolean;
+  intervalMs: number;
+  maxSlotsPerPass: number;
+  running: boolean;
+  repairOffset: number;
+  lastError: string | null;
+  lastResult: FirewallReconcileResult | null;
+}
+
+export interface FirewallReconcileResult {
+  dryRun: boolean;
+  repair: boolean;
+  durationMs: number;
+  at: string;
+  removed: { filter: number; nat: number; mangle: number; addressList: number };
+  repaired: { attempted: number; ok: number; failed: number };
+  audit: {
+    totals: { filter: number; nat: number; mangle: number };
+    hubRules: { filter: number; nat: number; mangle: number };
+    duplicates: { chain: string; comment: string; count: number }[];
+    orphans: { chain: string; comment: string; slot: number }[];
+    missing: { pppoeIdx: number; egress: string; comments: string[] }[];
+    staleHubWan: { pppoe: string; address: string; id: string }[];
+  };
+}
+
 export interface AutoProxySettings {
   mode: 'off' | 'semi' | 'full';
   pollIntervalMs: number;

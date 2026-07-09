@@ -26,6 +26,7 @@ import { useWideLayout } from '../hooks/useWideLayout';
 import { useListPagination } from '../hooks/useListPagination';
 import { IconFleet, IconWan } from '../components/ui/Icons';
 import IpQualityTag from '../components/IpQualityTag';
+import QuayIpTag from '../components/QuayIpTag';
 import EgressTag from '../components/EgressTag';
 import { resolveIpQuality } from '../lib/ipQuality';
 
@@ -390,7 +391,7 @@ export default function FleetPage() {
                           {ports ? <span className="mobile-mono">{ports}</span> : null}
                           <IpQualityTag {...row} publicIp={row.publicIp} />
                           <EgressTag pppoeName={row.name} egressPppoeName={row.egressPppoeName} />
-                          {row.quayipLabel ? <span>{row.quayipLabel}</span> : null}
+                          <QuayIpTag quayipStatus={row.quayipStatus} quayipLabel={row.quayipLabel} />
                         </ListCard.Meta>
                       </ListCard.Main>
                       <ListCard.Aside>

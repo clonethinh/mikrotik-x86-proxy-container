@@ -3,6 +3,7 @@ import type { WanInfo } from '../../services/api';
 import { HTTP_PORT_BASE, SOCKS_PORT_BASE } from '../../lib/proxyUtils';
 import DataTable, { type DataTableColumn } from '../ui/DataTable';
 import IpQualityTag from '../IpQualityTag';
+import QuayIpTag from '../QuayIpTag';
 
 export interface WanDataTableProps {
   rows: WanInfo[];
@@ -43,7 +44,10 @@ export default function WanDataTable({
       render: (r) => (
         <div className="flex flex-col gap-1">
           <span className="mobile-mono">{r.publicIp || '—'}</span>
-          <IpQualityTag {...r} publicIp={r.publicIp} />
+          <div className="flex flex-wrap gap-1">
+            <IpQualityTag {...r} publicIp={r.publicIp} />
+            <QuayIpTag quayipStatus={r.quayipStatus} quayipLabel={r.quayipLabel} />
+          </div>
         </div>
       ),
     },

@@ -3,13 +3,15 @@ import {
   Button, Chip, Input, Label, ListBox, NumberField, Select, TextField, toast,
 } from '@heroui/react';
 import {
-  api, AutoProxySettings, ClockSyncResult, MikrotikTestResult, RouterScriptActionResult, RouterScriptStatus,
+  api, AutoProxySettings, ClockSyncResult, FirewallReconcileResult, FirewallReconcileStatus,
+  MikrotikTestResult, RouterScriptActionResult, RouterScriptStatus,
 } from '../services/api';
 import { useAuth } from '../services/auth';
 import { formatDateTime } from '../lib/format';
 import MobileHeader from '../components/layout/MobileHeader';
 import PageLayout from '../components/layout/PageLayout';
 import CollapsibleSection from '../components/ui/CollapsibleSection';
+import DismissibleAlert from '../components/ui/DismissibleAlert';
 import ListCard from '../components/ui/ListCard';
 import RecordList from '../components/ui/RecordList';
 import KvList from '../components/ui/KvList';
@@ -46,7 +48,46 @@ export default function SettingsPage() {
   const [ensuringScripts, setEnsuringScripts] = useState(false);
   const [runningScript, setRunningScript] = useState<string | null>(null);
   const [routerScriptLastResult, setRouterScriptLastResult] = useState<RouterScriptActionResult | null>(null);
+  const [fwReconcile, setFwReconcile] = useState<FirewallReconcileStatus | null>(null);
+  const [fwLoading, setFwLoading] = useState(false);
+  const [fwRunning, setFwRunning] = useState(false);
+  const [fwLastResult, setFwLastResult] = useState<FirewallReconcileResult | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const loadFirewallReconcile = async () => {
+    setFwLoading(true);
+    try {
+      const r = await api.get<FirewallReconcileStatus>('/api/system/firewall/reconcile');
+      setFwReconcile(r);
+      if (r.lastResult) setFwLastResult(r.lastResult);
+    } catch { /* ignore */ }
+    finally { setFwLoading(false); }
+  };
+
+  const runFirewallReconcile = async (opts: { dryRun?: boolean; repairAll?: boolean }) => {
+    setFwRunning(true);
+    try {
+      const r = await api.post<{ ok: boolean } & FirewallReconcileResult>('/api/system/firewall/reconcile', {
+        dryRun: opts.dryRun === true,
+        repair: opts.dryRun !== true,
+        repairAll: opts.repairAll === true,
+      });
+      setFwLastResult(r);
+      await loadFirewallReconcile();
+      const { audit, removed, repaired } = r;
+      if (opts.dryRun) {
+        toast.info(`Audit: ${audit.orphans.length} orphan · ${audit.missing.length} thiếu · ${audit.duplicates.length} trùng`);
+      } else {
+        toast.success(
+          `Xong: xóa ${removed.nat + removed.filter + removed.mangle} rule · repair ${repaired.ok}/${repaired.attempted} slot`,
+        );
+      }
+    } catch (e) {
+      toast.danger(e instanceof Error ? e.message : 'Lỗi');
+    } finally {
+      setFwRunning(false);
+    }
+  };
 
   const loadRouterScripts = async () => {
     setScriptsLoading(true);
@@ -66,7 +107,10 @@ export default function SettingsPage() {
       setAutoProxy(auto);
       setLoading(false);
     });
-    if (user?.role === 'admin') loadRouterScripts();
+    if (user?.role === 'admin') {
+      loadRouterScripts();
+      loadFirewallReconcile();
+    }
   }, [user?.role]);
 
   const changePassword = async () => {
@@ -262,8 +306,64 @@ export default function SettingsPage() {
 
         {user?.role === 'admin' ? (
           <CollapsibleSection
+            title="Phục hồi Firewall"
+            subtitle={fwReconcile?.enabled ? `Tự động · ${Math.round((fwReconcile.intervalMs || 0) / 60000)} phút` : 'Audit & repair hub firewall'}
+            defaultOpen={false}
+            action={
+              <Button size="sm" variant="ghost" isPending={fwLoading} onPress={loadFirewallReconcile}>↻</Button>
+            }
+          >
+            <DismissibleAlert bannerId="settings-firewall-reconcile-info" title="Reconcile hub firewall">
+              Kiểm tra rule trùng/mồ côi (slot không còn trong DB), dọn hub-wan IP cũ, repair từng batch slot — tránh spike CPU trên router.
+            </DismissibleAlert>
+            <div className="mt-3 flex flex-col gap-2">
+              <Button variant="secondary" isPending={fwRunning} onPress={() => runFirewallReconcile({ dryRun: true })}>
+                Kiểm tra (dry-run)
+              </Button>
+              <Button isPending={fwRunning} onPress={() => runFirewallReconcile({})}>
+                Phục hồi batch
+              </Button>
+              <Button variant="danger" isPending={fwRunning} onPress={() => runFirewallReconcile({ repairAll: true })}>
+                Repair toàn bộ
+              </Button>
+            </div>
+            {fwReconcile ? (
+              <div className="mt-3">
+              <KvList
+                compact
+                grid
+                items={[
+                  { label: 'Tự động', value: <Chip size="sm" color={fwReconcile.enabled ? 'success' : 'default'}>{fwReconcile.enabled ? 'Bật' : 'Tắt'}</Chip> },
+                  { label: 'Chu kỳ', value: `${Math.round(fwReconcile.intervalMs / 60000)} phút` },
+                  { label: 'Batch', value: `${fwReconcile.maxSlotsPerPass} slot` },
+                ]}
+              />
+              </div>
+            ) : null}
+            {fwLastResult ? (
+              <div className="mt-3">
+              <KvList
+                compact
+                grid
+                items={[
+                  { label: 'Lần chạy cuối', value: `${formatDateTime(fwLastResult.at)} (${fwLastResult.durationMs}ms)` },
+                  { label: 'Orphan / thiếu / trùng', value: `${fwLastResult.audit.orphans.length} / ${fwLastResult.audit.missing.length} / ${fwLastResult.audit.duplicates.length}` },
+                  { label: 'Đã xóa', value: `NAT ${fwLastResult.removed.nat} · filter ${fwLastResult.removed.filter} · mangle ${fwLastResult.removed.mangle}` },
+                  {
+                    label: 'Repair',
+                    value: `${fwLastResult.repaired.ok}/${fwLastResult.repaired.attempted} slot${fwLastResult.repaired.failed > 0 ? ` · ${fwLastResult.repaired.failed} lỗi` : ''}`,
+                  },
+                ]}
+              />
+              </div>
+            ) : null}
+          </CollapsibleSection>
+        ) : null}
+
+        {user?.role === 'admin' ? (
+          <CollapsibleSection
             title="Router Scripts"
-            subtitle={`${routerScripts.filter((s) => s.installed).length}/${routerScripts.length} đã cài`}
+            subtitle={`${routerScripts.filter((s) => s.installed).length}/${routerScripts.length} đã cài · quayip · DuckDNS · protect`}
             defaultOpen={false}
             action={
               <div className="flex gap-1">
@@ -272,6 +372,9 @@ export default function SettingsPage() {
               </div>
             }
           >
+            <DismissibleAlert bannerId="settings-router-scripts-info" title="Script hệ thống trên MikroTik">
+              quayip: quay IP pool pppoe-out · duckdns: cập nhật DDNS từ pppoe-wan · protect: bảo vệ pppoe-wan
+            </DismissibleAlert>
             <RecordList>
               {routerScripts.map((s) => (
                 <ListCard key={s.name}>
@@ -279,10 +382,11 @@ export default function SettingsPage() {
                     <ListCard.Row>
                       <ListCard.Main>
                         <ListCard.Title>{s.label}</ListCard.Title>
-                        <ListCard.Subtitle>{s.description}</ListCard.Subtitle>
+                        <ListCard.Subtitle>{s.name} · {s.description}</ListCard.Subtitle>
                         <ListCard.Meta>
                           <span>Run {s.runCount}</span>
-                          <span>Last {s.lastStarted || '—'}</span>
+                          <span>Scheduler {s.scheduler?.interval || '—'}</span>
+                          <span>Last {s.lastStarted ? formatDateTime(s.lastStarted) : '—'}</span>
                         </ListCard.Meta>
                       </ListCard.Main>
                       <ListCard.Aside>
@@ -306,19 +410,49 @@ export default function SettingsPage() {
             </RecordList>
             {routerScriptLastResult ? (
               <div className="mt-3 rounded-lg border border-border/60 bg-surface-secondary/40 p-3 text-sm">
-                <p className="font-medium">{routerScriptLastResult.summary}</p>
-                <p className="mt-1 text-xs text-muted">
-                  {new Date(routerScriptLastResult.at).toLocaleString('vi-VN')} · {routerScriptLastResult.durationMs}ms
-                </p>
+                <KvList
+                  compact
+                  items={[
+                    {
+                      label: 'Hành động',
+                      value: routerScriptLastResult.action === 'ensure'
+                        ? 'Cài đặt script'
+                        : `Chạy ${routerScriptLastResult.script || '—'}`,
+                    },
+                    { label: 'Tóm tắt', value: routerScriptLastResult.summary },
+                    {
+                      label: 'Thời gian',
+                      value: `${formatDateTime(routerScriptLastResult.at)} · ${routerScriptLastResult.durationMs}ms`,
+                    },
+                  ]}
+                />
+                {routerScriptLastResult.installChanges.length > 0 ? (
+                  <div className="mt-3">
+                    <p className="mb-1 text-xs font-medium text-muted">Script thay đổi</p>
+                    <div className="flex flex-wrap gap-1">
+                      {routerScriptLastResult.installChanges.map((c) => (
+                        <Chip key={c.name} size="sm" color={c.nowInstalled ? 'success' : 'default'}>
+                          {c.label}: {c.wasInstalled ? 'có' : 'thiếu'} → {c.nowInstalled ? 'OK' : 'thiếu'}
+                        </Chip>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {routerScriptLastResult.ipChanges.length > 0 ? (
-                  <div className="mt-2 space-y-1 font-mono text-xs">
-                    {routerScriptLastResult.ipChanges.slice(0, 5).map((c) => (
-                      <div key={c.pppoeName}>{c.pppoeName}: {c.before || '—'} → {c.after || '—'}</div>
-                    ))}
+                  <div className="mt-3">
+                    <p className="mb-1 text-xs font-medium text-muted">IP đổi</p>
+                    <div className="space-y-1 font-mono text-xs">
+                      {routerScriptLastResult.ipChanges.slice(0, 8).map((c) => (
+                        <div key={c.pppoeName}>{c.pppoeName}: {c.before || '—'} → {c.after || '—'}</div>
+                      ))}
+                    </div>
+                    {routerScriptLastResult.ipChanges.length > 8 ? (
+                      <p className="mt-1 text-xs text-muted">+{routerScriptLastResult.ipChanges.length - 8} WAN khác</p>
+                    ) : null}
                   </div>
                 ) : null}
                 {(routerScriptLastResult.outputLines.length > 0 || routerScriptLastResult.logLines.length > 0) ? (
-                  <pre className="proxy-logs-pre mt-2 max-h-32 text-[10px]">
+                  <pre className="proxy-logs-pre mt-3 max-h-44 text-[10px]">
                     {[...routerScriptLastResult.outputLines, ...routerScriptLastResult.logLines].join('\n')}
                   </pre>
                 ) : null}

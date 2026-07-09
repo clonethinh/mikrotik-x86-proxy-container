@@ -24,6 +24,7 @@ import { useWideLayout } from '../hooks/useWideLayout';
 import { useListPagination } from '../hooks/useListPagination';
 import { IconWan } from '../components/ui/Icons';
 import IpQualityTag from '../components/IpQualityTag';
+import QuayIpTag from '../components/QuayIpTag';
 import { resolveIpQuality } from '../lib/ipQuality';
 
 interface WanActionEvent {
@@ -465,6 +466,7 @@ export default function WanPage() {
                       <ListCard.Subtitle>{w.publicIp || 'Chưa có IP'}</ListCard.Subtitle>
                       <ListCard.Meta>
                         <IpQualityTag {...w} publicIp={w.publicIp} />
+                        <QuayIpTag quayipStatus={w.quayipStatus} quayipLabel={w.quayipLabel} />
                         {w.hasProxy ? (
                           <>
                             <Chip size="sm" color={w.proxyStatus === 'running' ? 'success' : 'default'}>{w.proxyStatus || '—'}</Chip>
@@ -511,6 +513,12 @@ export default function WanPage() {
                     { label: 'Trạng thái', value: detail.running ? 'UP' : 'DOWN' },
                     { label: 'IP public', value: detail.publicIp || '—' },
                     { label: 'Chất lượng IP', value: resolveIpQuality(detail).ipQualityLabel || '—' },
+                    {
+                      label: 'QuayIP',
+                      value: detail.quayipStatus && detail.quayipStatus !== 'protected' && detail.quayipLabel
+                        ? <QuayIpTag quayipStatus={detail.quayipStatus} quayipLabel={detail.quayipLabel} />
+                        : '—',
+                    },
                     { label: 'Uptime', value: detail.uptime || '—' },
                     { label: 'User PPPoE', value: detail.user || '—' },
                     { label: 'Comment', value: detail.comment || '—' },

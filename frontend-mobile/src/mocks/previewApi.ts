@@ -96,9 +96,73 @@ export async function previewHttp<T>(method: string, path: string, body?: unknow
     return method === 'PATCH' ? ok({ ...mockAutoProxy, ...(body as object) }) as T : ok(mockAutoProxy) as T;
   }
   if (basePath === '/api/system/router-scripts') return ok({ scripts: mockRouterScripts }) as T;
-  if (basePath === '/api/system/router-scripts/ensure') return ok({ ok: true, scripts: mockRouterScripts }) as T;
+  if (basePath === '/api/system/router-scripts/ensure') {
+    return ok({
+      ok: true,
+      action: 'ensure',
+      durationMs: 1240,
+      summary: 'Đã cài/cập nhật 3 script trên router',
+      outputLines: ['quayip: OK', 'duckdns-update: OK', 'protect-pppoe-wan: OK'],
+      logLines: [],
+      installChanges: mockRouterScripts.map((s) => ({
+        name: s.name,
+        label: s.label,
+        wasInstalled: !s.installed,
+        nowInstalled: true,
+        runCountBefore: s.runCount,
+        runCountAfter: s.runCount,
+      })),
+      ipChanges: [],
+      at: new Date().toISOString(),
+      scripts: mockRouterScripts,
+    }) as T;
+  }
   if (basePath.startsWith('/api/system/router-scripts/') && basePath.endsWith('/run')) {
-    return ok({ ok: true, scripts: mockRouterScripts }) as T;
+    const name = basePath.split('/').slice(-2, -1)[0] || 'quayip';
+    return ok({
+      ok: true,
+      action: 'run',
+      script: name,
+      durationMs: 820,
+      summary: `Đã chạy ${name}`,
+      outputLines: [`script ${name} finished`],
+      logLines: [],
+      installChanges: [],
+      ipChanges: [
+        { pppoeName: 'pppoe-out3', before: '1.2.3.4', after: '5.6.7.8' },
+      ],
+      at: new Date().toISOString(),
+      scripts: mockRouterScripts,
+    }) as T;
+  }
+  if (basePath === '/api/system/firewall/reconcile') {
+    const dryRun = method !== 'POST' || (body as { dryRun?: boolean })?.dryRun === true;
+    const result = {
+      dryRun,
+      repair: !dryRun,
+      durationMs: dryRun ? 420 : 1860,
+      at: new Date().toISOString(),
+      removed: { filter: dryRun ? 0 : 2, nat: dryRun ? 0 : 1, mangle: dryRun ? 0 : 3, addressList: 0 },
+      repaired: { attempted: dryRun ? 0 : 8, ok: dryRun ? 0 : 8, failed: 0 },
+      audit: {
+        totals: { filter: 120, nat: 95, mangle: 88 },
+        hubRules: { filter: 40, nat: 35, mangle: 30 },
+        duplicates: dryRun ? [{ chain: 'forward', comment: 'hub-slot-12', count: 2 }] : [],
+        orphans: dryRun ? [{ chain: 'forward', comment: 'hub-slot-99', slot: 99 }] : [],
+        missing: dryRun ? [{ pppoeIdx: 7, egress: 'pppoe-out7', comments: ['hub-nat-7'] }] : [],
+        staleHubWan: [],
+      },
+    };
+    if (method === 'POST') return ok({ ok: true, ...result }) as T;
+    return ok({
+      enabled: true,
+      intervalMs: 1800000,
+      maxSlotsPerPass: 15,
+      running: false,
+      repairOffset: 0,
+      lastError: null,
+      lastResult: result,
+    }) as T;
   }
   if (basePath === '/api/audit') {
     const limit = parseInt(qs?.get('limit') || '50', 10);
