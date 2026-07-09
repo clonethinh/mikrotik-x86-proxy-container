@@ -2,13 +2,22 @@
 
 [![CI](https://github.com/clonethinh/mikrotik-x86-proxy-container/actions/workflows/ci.yml/badge.svg)](https://github.com/clonethinh/mikrotik-x86-proxy-container/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![RouterOS](https://img.shields.io/badge/RouterOS-v7.4%2B%20x86__64-red)](https://mikrotik.com)
+[![Node](https://img.shields.io/badge/Node.js-22-green)](https://nodejs.org)
 
-**WebUI toàn diện quản lý proxy multi-PPPoE trên MikroTik RouterOS v7 (Container) + 3proxy hub.**
+**Hệ thống WebUI + API + 3proxy hub quản lý proxy multi-PPPoE trên MikroTik RouterOS v7 Container.**
 
-Mỗi PPPoE WAN = 1 proxy riêng (HTTP + SOCKS5) với **IP public thật** của chính WAN đó.  
-Toàn bộ stack (Backend + Frontend desktop + Frontend mobile + 3proxy hub shards) chạy **trực tiếp trên router x86_64** — không bắt buộc VPS.
+Mỗi `pppoe-outN` = một proxy (HTTP + SOCKS5) với **IP public thật** của WAN đó.  
+Stack chạy **trên router x86_64** (hoặc external VPS). Không bắt buộc máy chủ riêng.
 
-📦 **GitHub:** https://github.com/clonethinh/mikrotik-x86-proxy-container
+| | |
+|--|--|
+| **Repo** | https://github.com/clonethinh/mikrotik-x86-proxy-container |
+| **WebUI desktop** | `http://<host>:8088/` |
+| **WebUI mobile** | `http://<host>:8088/m/` |
+| **API health** | `GET /api/health` |
+| **WebSocket** | `WS /ws` |
+| **License** | MIT |
 
 ```bash
 git clone https://github.com/clonethinh/mikrotik-x86-proxy-container.git
@@ -19,721 +28,1156 @@ cd mikrotik-x86-proxy-container
 
 ## Mục lục
 
-1. [Tổng quan & tính năng](#tổng-quan--tính-năng)
-2. [Kiến trúc hệ thống](#kiến-trúc-hệ-thống)
-3. [Tech stack](#tech-stack)
-4. [Cấu trúc thư mục](#cấu-trúc-thư-mục)
-5. [Chi tiết codebase](#chi-tiết-codebase)
-6. [Yêu cầu hệ thống](#yêu-cầu-hệ-thống)
-7. [Cài đặt nhanh (Windows 1-click)](#cài-đặt-nhanh-windows-1-click)
-8. [Cấu hình](#cấu-hình)
-9. [WebUI](#webui)
-10. [API REST & WebSocket](#api-rest--websocket)
-11. [Mô hình dữ liệu (Prisma)](#mô-hình-dữ-liệu-prisma)
-12. [MikroTik scripts](#mikrotik-scripts)
-13. [Scripts & automation](#scripts--automation)
-14. [Chế độ deploy & scale](#chế-độ-deploy--scale)
-15. [Background services](#background-services)
-16. [Phát triển local](#phát-triển-local)
-17. [Troubleshooting](#troubleshooting)
-18. [Bảo mật](#bảo-mật)
-19. [Tài liệu tham khảo](#tài-liệu-tham-khảo)
-20. [License](#license)
+1. [Giới thiệu & mục tiêu](#1-giới-thiệu--mục-tiêu)
+2. [Tính năng đầy đủ](#2-tính-năng-đầy-đủ)
+3. [Kiến trúc hệ thống](#3-kiến-trúc-hệ-thống)
+4. [Tech stack](#4-tech-stack)
+5. [Cấu trúc thư mục (toàn bộ)](#5-cấu-trúc-thư-mục-toàn-bộ)
+6. [Backend chi tiết](#6-backend-chi-tiết)
+7. [Frontend desktop](#7-frontend-desktop)
+8. [Frontend mobile](#8-frontend-mobile)
+9. [3proxy hub](#9-3proxy-hub)
+10. [MikroTik scripts](#10-mikrotik-scripts)
+11. [Setup Windows 1-click](#11-setup-windows-1-click)
+12. [Cấu hình & biến môi trường](#12-cấu-hình--biến-môi-trường)
+13. [API REST đầy đủ](#13-api-rest-đầy-đủ)
+14. [WebSocket events](#14-websocket-events)
+15. [Mô hình dữ liệu Prisma](#15-mô-hình-dữ-liệu-prisma)
+16. [Export / Import proxy](#16-export--import-proxy)
+17. [Background services & boot sequence](#17-background-services--boot-sequence)
+18. [Scripts vận hành](#18-scripts-vận-hành)
+19. [Chế độ deploy & scale](#19-chế-độ-deploy--scale)
+20. [Phát triển local](#20-phát-triển-local)
+21. [Troubleshooting](#21-troubleshooting)
+22. [Bảo mật & .gitignore](#22-bảo-mật--gitignore)
+23. [Tài liệu & License](#23-tài-liệu--license)
 
 ---
 
-## Tổng quan & tính năng
+## 1. Giới thiệu & mục tiêu
 
-| Nhóm | Chi tiết |
-|------|----------|
-| **Proxy per-PPPoE** | Routing + NAT + dstnat + hub slot cho từng `pppoe-outN` → exit IP = IP public WAN đó |
-| **Hub mode scale** | 1–N container **3proxy-hub** (shard), mỗi shard nhiều slot; mặc định tới **300** PPPoE (`HUB_MAX_PPPOE_OUT`) |
-| **IP quality** | Phân loại `public` / `cgnat` / `link_local` / `private` / `missing`; `isUsableWanIp` thống nhất watcher + peek IP + quayip |
-| **Egress động (hub)** | Proxy có thể gắn `egressPppoeName` khác slot; pool reallocate khi WAN chết / IP xấu |
-| **Auto provision** | WanWatcher: phát hiện WAN mới → countdown → tạo proxy; mode `off` / `semi` / `full` |
-| **WAN queue** | Tạo/bật PPPoE tuần tự (`create-next`, enable + auto-proxy, bulk enable/disable) |
-| **Quay IP (quayip)** | Script RouterOS + scheduler **5m**, max **16** lần quay/phiên; bỏ qua `pppoe-wan` |
-| **Dashboard realtime** | CPU / RAM / HDD, WAN traffic, LAN device traffic, fleet overview |
-| **LAN traffic** | Mangle + conn-mark idempotent — upload/download theo host LAN |
-| **Rate limit & quota** | Speed up/down, quota ngày/tuần/tháng, max conn, giờ hoạt động, hết hạn (3proxy + firewall) |
-| **Device routing** | Gán thiết bị LAN (IP / MAC / DHCP hostname) ra đúng WAN |
-| **SSH hardening** | Port mặc định `22222`, blacklist brute-force tự động |
-| **Router scripts UI** | Settings: ensure/run quayip, DuckDNS, protect-pppoe-wan, SSH blacklist — có **summary + IP changes** |
-| **Redeploy thông minh** | REST redeploy, HTTP bootstrap restore, `post-deploy-bootstrap` sync `.rsc` + scripts |
-| **Dual UI** | Desktop Ant Design `/` · Mobile HeroUI `/m/` |
-| **Realtime WebSocket** | Status, IP change, health, traffic, audit (replay buffer) |
-| **Export / Import** | Nhiều format + bulk credentials |
-| **Audit** | Log mọi thao tác admin |
-| **LOW_CPU_MODE** | Giảm poll metrics/logs/reconcile; tăng debounce rate-limit (15s) khi bật |
-| **Windows 1-click** | `setup.bat` — winget, wizard, build, upload, import, fleet bootstrap |
+### Bài toán
+
+Nhà mạng / lab có **nhiều đường PPPoE** trên một MikroTik x86. Cần:
+
+- Mỗi đường = 1 proxy outbound với **đúng IP public** của đường đó  
+- Quản lý tập trung (CRUD, quay IP, health, traffic, quota)  
+- Scale hàng chục–trăm WAN mà không nổ số container  
+- Dashboard realtime + mobile  
+- Deploy 1-click từ Windows, redeploy code không mất data  
+
+### Giải pháp
+
+| Lớp | Thành phần |
+|-----|------------|
+| **Data plane** | 3proxy hub shards + RouterOS mangle/NAT/routing per slot |
+| **Control plane** | Fastify backend (REST + WS) trong container `webuiproxymikrotik` |
+| **UI** | React desktop (Ant Design) + React mobile (HeroUI) |
+| **State** | SQLite (`/data/proxy.db`) mount persistent `disk1/data` |
+| **Ops** | `setup.bat`, deploy-auto, post-deploy-bootstrap, quayip scheduler |
+
+### Hai chế độ proxy
+
+| Mode | `PROXY_DEPLOY_MODE` | Mô tả |
+|------|---------------------|--------|
+| **hub** (mặc định) | `hub` | Vài container 3proxy-hub; mỗi shard ~50 slot; scale tới 300 PPPoE |
+| **legacy** | `legacy` | 1 container 3proxy / 1 PPPoE (debug / fleet nhỏ) |
 
 ---
 
-## Kiến trúc hệ thống
+## 2. Tính năng đầy đủ
+
+### Proxy & networking
+
+- [x] Proxy HTTP + SOCKS5 per PPPoE (ports nội bộ + external dstnat)
+- [x] Hub multi-shard (`HUB_SHARD_COUNT` × `HUB_SHARD_SIZE`)
+- [x] Egress động (`egressPppoeName`) — pool reallocate khi WAN chết/IP xấu
+- [x] IP quality: `public` / `cgnat` / `link_local` / `private` / `missing` / `invalid`
+- [x] Chỉ finalize proxy khi `isUsableWanIp` (đồng bộ tiêu chí quayip)
+- [x] Hairpin LAN (`LAN_SUBNETS`) truy cập proxy từ mạng nội bộ
+- [x] Device routing: IP / MAC / DHCP hostname → WAN cụ thể
+- [x] Firewall reconcile định kỳ (audit/repair rule hub)
+- [x] Rate limit firewall + 3proxy (debounce; LOW_CPU 15s)
+- [x] Quota daily/weekly/monthly, max connections, allowed hours, expires
+
+### WAN lifecycle
+
+- [x] WanWatcher poll PPPoE, broadcast WS
+- [x] Auto provision: `off` | `semi` | `full` (countdown → create proxy)
+- [x] WanCreateQueue: create-next / create idx (tuần tự)
+- [x] Enable WAN + auto apply proxy (background + WS progress)
+- [x] Bulk enable / bulk disable
+- [x] Internet probe (ping) trước finalize
+- [x] quayip.rsc: scheduler 5m, max 16 lần quay/phiên, bỏ qua pppoe-wan
+
+### Monitoring & realtime
+
+- [x] Dashboard: CPU/Mem/HDD, containers, WAN traffic, LAN talkers, fleet hero
+- [x] Proxy metrics live + history + rollup hour/day/week/month
+- [x] BPS từ PPPoE interface counter (khớp Winbox) và/hoặc 3proxy admin
+- [x] Health check + ProxyPing batch round-robin
+- [x] Request logs / top domains / live tail (tuỳ env)
+- [x] WebSocket push + replay buffer ~100 events
+
+### Ops & security
+
+- [x] Dual SPA desktop + mobile
+- [x] JWT cookie auth (admin / viewer roles)
+- [x] Audit log mọi thao tác
+- [x] SSH port 22222 + blacklist brute-force
+- [x] protect-pppoe-wan (không disable WAN quản trị)
+- [x] DuckDNS update từ pppoe-wan
+- [x] Clock sync NTP Asia/Ho_Chi_Minh
+- [x] Redeploy WebUI qua REST (upload tar)
+- [x] Self-watchdog: tự `/container/start` nếu webui stop
+- [x] LOW_CPU_MODE giảm poll/log/metrics
+- [x] Settings UI: ensure/run router scripts + summary + IP changes
+- [x] post-deploy-bootstrap: sync `.rsc` + ensure scripts
+- [x] Windows 1-click setup orchestrator
+
+---
+
+## 3. Kiến trúc hệ thống
+
+### 3.1 Sơ đồ tổng thể
 
 ```
-MikroTik RouterOS v7 (x86_64) + package container
-│
-├── bridge containers-veth
-│   ├── veth-webui        → webuiproxymikrotik     (Fastify + dual SPA + SQLite)
-│   ├── veth-3p-hub-0..N  → 3proxy-hub shard       (nhiều slot / container)
-│   └── (legacy) veth-3p-N → proxy3p-N             (1 container / 1 PPPoE)
-│
-├── pppoe-wan             → WAN quản trị (DuckDNS, WebUI, SSH) — được protect script bảo vệ
-├── pppoe-out1..N         → pool proxy WAN
-│       └── mangle mark-routing → route table to_pppoeN
-│       └── srcnat → IP public thật của interface
-│
-└── disk1/
-    ├── data/proxy.db              SQLite persistent
-    ├── 3proxy-hub.tar             image hub
-    ├── webuiproxymikrotik.tar     image WebUI
-    └── webuiproxymikrotik/*.rsc   script RouterOS
+                         ┌─────────────────────────────────────┐
+  Clients (Internet/LAN) │  :30055+N HTTP  ·  :31055+N SOCKS   │
+                         └──────────────┬──────────────────────┘
+                                        │ dstnat
+┌───────────────────────────────────────▼───────────────────────────────────────┐
+│  MikroTik RouterOS v7 x86_64                                                  │
+│  bridge containers-veth                                                       │
+│    ├── veth-webui ──► container webuiproxymikrotik                            │
+│    │                    Fastify :8088 · React / · React /m/ · SQLite          │
+│    │                    REST/SSH → RouterOS · WS clients                      │
+│    └── veth-3p-hub-S ──► container 3proxy-hub-S  (S = 0..shardCount-1)      │
+│                           multi-slot IPs /32 · 3proxy.cfg mount               │
+│                                                                               │
+│  pppoe-wan ─────────── WAN quản trị (DuckDNS, SSH, WebUI public)              │
+│  pppoe-out1..N ─────── pool proxy WAN                                         │
+│       mangle mark-routing → table to_pppoeN → srcnat public IP                │
+│                                                                               │
+│  disk1/data/proxy.db · disk1/*-hub.tar · disk1/webuiproxymikrotik/*.rsc       │
+└───────────────────────────────────────────────────────────────────────────────┘
 ```
 
-### Luồng traffic 1 proxy
+### 3.2 Luồng traffic 1 proxy slot N
 
 ```
-Client ──► <public-ip-hoặc-host>:30055+N (HTTP) / 31055+N (SOCKS)
-              │ dstnat → 3proxy slot (internal 20000+N / 21000+N)
-              │
-Outbound ──► mangle src=slot-ip → routing-mark to_pppoeN (hoặc egress)
-              │ default route via pppoe-outN
-              │ srcnat → public IP của WAN egress
-              ▼
-           Internet (exit IP = IP public WAN)
+IN:  Client → <public-ip>:30055+N
+       dstnat → slot-ip:20000+N (HTTP) / 21000+N (SOCKS) trong hub
+
+OUT: 3proxy request
+       mangle prerouting src=slot-ip → routing-mark to_pppoeN (hoặc egress)
+       route 0.0.0.0/0 via pppoe-outN
+       srcnat to-addresses=<IP public pppoe-outN>
+       → Internet với exit IP = WAN đó
 ```
 
-### Port map (mặc định)
+### 3.3 Port map mặc định
 
-| Vai trò | Công thức / giá trị |
-|---------|---------------------|
-| HTTP nội bộ | `20000 + N` |
-| SOCKS nội bộ | `21000 + N` |
-| HTTP external | `30055 + N` |
-| SOCKS external | `31055 + N` |
-| WebUI desktop | `:8088/` |
-| WebUI mobile | `:8088/m/` |
-| SSH router | `22222` (khuyến nghị) |
-| Management host | DuckDNS / `MIKROTIK_WAN_HOST` (không hardcode IP) |
+| Vai trò | Công thức | Env |
+|---------|-----------|-----|
+| HTTP internal | `20000 + N` | `PROXY_HTTP_PORT_BASE` |
+| SOCKS internal | `21000 + N` | `PROXY_SOCKS_PORT_BASE` |
+| HTTP external | `30055 + N` | `EXT_HTTP_PORT_BASE` |
+| SOCKS external | `31055 + N` | `EXT_SOCKS_PORT_BASE` |
+| WebUI | `8088` | `PORT` |
+| Mobile path | `/m/` | (static) |
+| SSH | `22222` | `MIKROTIK_SSH_PORT` |
 
-### Idempotency
+> Port external bắt đầu **30055** (tránh vùng 30000–30054 dễ lỗi trên một số setup).
 
-Mọi rule RouterOS dùng **comment marker** (`ctn-pppoe-outN`, `ctn-mangle-…`, `gw-veth-…`…).  
-`install-all.rsc` / ensure scripts / firewall reconcile chạy lại an toàn.
+### 3.4 Idempotency — comment markers RouterOS
 
-### IP quality (đồng bộ quayip)
+| Comment | Rule |
+|---------|------|
+| `ctn-mangle-pppoe-outN` | mangle mark-routing |
+| `ctn-pppoe-outN` | srcnat |
+| `ctn-pppoe-outN-HTTP` / `-SOCKS` | dstnat |
+| `gw-veth-3p-N` / hub gw | address trên bridge |
+| `bp-veth-3p-N` | bridge port |
+| `webuiproxymikrotik-accept-proxy-range` | filter accept |
 
-| Quality | Ví dụ | Usable? |
-|---------|--------|---------|
-| `public` | `42.x.x.x` | ✅ |
-| `cgnat` | `100.64.0.0/10` | ❌ client ngoài không vào được |
-| `link_local` | `169.254.x.x` | ❌ PPPoE lỗi |
-| `private` | `10/8`, `192.168/16`… | ❌ (tuỳ rejectPrivate) |
+`find` theo comment → đã có thì skip. Chạy lại `install-all.rsc` an toàn.
+
+### 3.5 IP quality (đồng bộ quayip)
+
+| Quality | Pattern | Usable proxy? |
+|---------|---------|---------------|
+| `public` | IP public thật | ✅ |
+| `cgnat` | `100.64.0.0/10` | ❌ |
+| `link_local` | `169.254.0.0/16` | ❌ |
+| `private` | RFC1918 (tuỳ flag) | ❌ |
 | `missing` / `invalid` | — | ❌ |
 
-WanWatcher + HealthMonitor + peek IP chỉ **finalize proxy** khi `isUsableWanIp`.  
-IP xấu → đánh dấu pending + thử **đổi egress pool** (hub).
+Code: `backend/src/lib/ipQualityUtils.ts` — `classifyPublicIp`, `isBadWanIp`, `isUsableWanIp`.  
+UI: `IpQualityTag`, `EgressTag` (desktop + mobile).
+
+### 3.6 Trade-offs RouterOS
+
+| Đã chọn | Lý do |
+|---------|--------|
+| REST cho hầu hết ops | Ổn định container/veth/NAT/mangle |
+| SSH cho file/mount/shell/import | REST không cover mount & `/container/shell` |
+| Hub multi-slot thay vì 1 ctn/WAN | Disk/RAM/extract time; scale 300 |
+| External ports 30055+ | Tránh range broken |
+| `containerShell` skip nếu không running | Tránh spam ssh-cmd fail |
+| Self-watchdog 60s | PPPoE flap làm container mất net |
+
+### 3.7 Resource budget (tham chiếu)
+
+| Component | RAM | Disk |
+|-----------|-----|------|
+| WebUI container | ~100 MB | ~50–80 MB image extract |
+| 1 hub shard 3proxy | ~10–30 MB | ~100 MB extract |
+| 6 shards + webui | ~200–300 MB | ~0.7–1 GB |
+| SQLite + logs | tuỳ traffic | mount `disk1/data` |
+
+Hub mode tiết kiệm hơn legacy (legacy: N × 100 MB extract).
 
 ---
 
-## Tech stack
+## 4. Tech stack
 
-| Thành phần | Công nghệ |
-|------------|-----------|
-| Frontend desktop | React 18, TypeScript, Vite 6, **Ant Design 6**, @ant-design/plots, Zustand |
-| Frontend mobile | React 19, TypeScript, Vite 6, **HeroUI 3**, Tailwind CSS 4, Motion, Zustand |
-| Backend | Node.js 22, **Fastify 5**, TypeScript, **Prisma 5**, SQLite, Zod, argon2, ssh2 |
-| Realtime | `@fastify/websocket` + custom event hub (replay) |
-| Proxy engine | **3proxy hub** (`webuiproxymikrotik/3proxy-hub:2`) — multi-slot cfg mount |
-| RouterOS | v7.4+ (Container, mangle, routing, firewall, REST + SSH) |
-| Deploy | Docker multi-stage (linux/amd64), setup orchestrator Windows, REST redeploy |
-| CI | GitHub Actions — build backend + frontend on `main` |
+| Lớp | Công nghệ |
+|-----|-----------|
+| Desktop UI | React 18, TS, Vite 6, **Ant Design 6**, @ant-design/plots, Zustand, react-router 7 |
+| Mobile UI | React 19, TS, Vite 6, **HeroUI 3**, Tailwind CSS 4, Motion, Zustand |
+| Backend | Node 22, **Fastify 5**, TS, Prisma 5, SQLite, Zod, argon2, ssh2, pino |
+| Plugins Fastify | cors, helmet, jwt, cookie, websocket, static, rate-limit, multipart |
+| Proxy | 3proxy hub image `webuiproxymikrotik/3proxy-hub:2` |
+| Router | MikroTik RouterOS 7.4+ Container package |
+| Deploy | Docker multi-stage linux/amd64, setup orchestrator, deploy-auto |
+| CI | GitHub Actions: `npm ci` + build backend + frontend |
 
 ---
 
-## Cấu trúc thư mục
+## 5. Cấu trúc thư mục (toàn bộ)
 
 ```
 webuiproxymikrotik/
-├── backend/                    # API + business logic
+├── README.md
+├── LICENSE
+├── package.json                 # npm scripts gốc (setup/deploy)
+├── Dockerfile                   # multi-stage WebUI (builder + runtime tini)
+├── docker-compose.yml           # external mode
+├── .dockerignore / .gitignore / .gitattributes
+├── .github/workflows/ci.yml
+│
+├── backend/
+│   ├── package.json
+│   ├── tsconfig.json
+│   ├── prisma/schema.prisma
+│   ├── .env.example
 │   ├── src/
-│   │   ├── server.ts           # Fastify entry, dual SPA, bootstrap services
-│   │   ├── routes/             # auth, proxies, wan, devices, system, …
-│   │   ├── services/           # proxy, mikrotik, metrics, auto, wan, …
-│   │   ├── lib/                # config, queue, ipQuality, hub, network utils
+│   │   ├── server.ts
+│   │   ├── db/prisma.ts
 │   │   ├── middleware/auth.ts
 │   │   ├── realtime/hub.ts
 │   │   ├── ws/handler.ts
-│   │   └── db/prisma.ts
-│   ├── prisma/schema.prisma
-│   └── .env.example
+│   │   ├── routes/              # 9 files API
+│   │   ├── services/            # business logic (35+ files)
+│   │   └── lib/                 # config, utils, tests
+│   └── scripts/                 # ops một lần (cleanup, audit, reset-admin…)
 │
-├── frontend/                   # Desktop SPA → /
-├── frontend-mobile/            # Mobile SPA → /m/
+├── frontend/                    # Desktop SPA → public/
+│   └── src/{pages,components,hooks,services,lib,theme,types}
 │
-├── docker/3proxy-hub/          # Hub image: entrypoint multi-slot + reload
-├── mikrotik/                   # *.rsc idempotent
-├── setup/                      # 1-click Windows orchestrator + steps
-├── scripts/                    # deploy, post-deploy, scale, cleanup, diag
-├── docs/                       # architecture, RouterOS commands
+├── frontend-mobile/             # Mobile SPA → public/mobile/
+│   └── src/{pages,components,hooks,services,lib}
 │
-├── Dockerfile                  # WebUI multi-stage (Node 22)
-├── docker-compose.yml          # DEPLOY_TARGET=external
+├── docker/3proxy-hub/
+│   ├── Dockerfile
+│   ├── hub-entrypoint.sh
+│   ├── hub-reload.sh
+│   └── hub-admin-fetch.sh
+│
+├── mikrotik/                    # 22 *.rsc
+├── setup/                       # Windows orchestrator
+│   ├── orchestrator.js
+│   ├── lib/                     # config, ssh, network, env, duckdns…
+│   └── steps/                   # preflight → verify (11 steps)
+│
+├── scripts/                     # deploy, scale, diag, post-deploy
+│   └── lib/deploy-config.js
+│
+├── docs/
+│   ├── architecture.md
+│   ├── routeros-commands.md
+│   ├── router-access.md
+│   └── ant-design-frontend-redesign.md
+│
 ├── setup.bat / setup.ps1
 ├── setup.config.example.json
-├── package.json
-└── README.md
+└── setup.config.minimal.json
 ```
+
+**Không commit (gitignore):** `.env*`, `setup.config.json`, `router-access.json`, `data/`, `*.db`, `*.tar`, `node_modules/`, `terminals/`, `tmp/`, secrets…
 
 ---
 
-## Chi tiết codebase
+## 6. Backend chi tiết
 
-### Backend — routes
+### 6.1 Entry `server.ts`
 
-| File | Endpoint chính |
-|------|----------------|
-| `auth.ts` | login, logout, me, change-password, refresh |
-| `proxies.ts` | CRUD, start/stop/restart, reload-ip, test, reapply, bulk, export/import, credentials, history |
-| `proxyMetrics.ts` | live metrics, history, limits, uptime |
-| `proxyLogs.ts` | request logs, domain stats, tail |
-| `wan.ts` | create-queue, create-next, create, enable/disable, bulk enable/disable |
-| `devices.ts` | device routing CRUD + apply, DHCP leases |
-| `system.ts` | dashboard, router-monitor, redeploy-webui, firewall reconcile, SSH blacklist, **router-scripts** (ensure/run + summary), clock, purge, logs/metrics ops |
-| `settings.ts` | auto-proxy, WAN discovery, provision now/cancel |
-| `audit.ts` | audit log |
+1. `prisma db push` (sync schema mỗi boot)  
+2. `initDb` + seed admin từ env  
+3. Fastify: CORS, Helmet, JWT cookie, WebSocket, dual static SPA  
+4. Register routes + `/api/health`  
+5. Start background services (xem §17)  
+6. Hub bootstrap + firewall reconcile (nếu `DEPLOY_TARGET=router` + hub)  
+7. Self-watchdog 60s  
+8. Graceful shutdown stop monitors  
 
-Public: `GET /api/health`.
+**Dual SPA:**
 
-### Backend — services
+| Path | Root |
+|------|------|
+| `/` | `public/` (desktop dist) |
+| `/m/` | `public/mobile/` (mobile dist) |
+| fallback GET SPA | index.html tương ứng; `/api/*` → 404 JSON |
 
-| Thư mục / service | Trách nhiệm |
-|-------------------|-------------|
-| `proxy/ProxyService` | CRUD + điều phối apply |
-| `proxy/HubProxyService` | Shard, veth hub, cfg multi-slot, reload SIGUSR1, LAN access |
-| `proxy/HubConfigService` | Sinh `3proxy.cfg` + slot IPs |
-| `proxy/HubRateLimitService` | Rate limit firewall/3proxy (debounce, LOW_CPU 15s) |
-| `proxy/PoolAllocator` | Reallocate egress khi WAN down/IP xấu |
-| `mikrotik/MikrotikService` | REST + SSH; **`containerShell`** an toàn (skip nếu container không running) |
-| `mikrotik/RouterScriptService` | quayip, duckdns, protect, ssh-blacklist — install/run + **ipChanges/summary** |
-| `mikrotik/FirewallReconcileService` | Audit/repair rule hub theo chu kỳ |
-| `mikrotik/SshBlacklistService` | Blacklist SSH |
-| `auto/WanWatcherService` | Sync PPPoE, IP quality, finalize/reallocate |
-| `auto/AutoProvisionOrchestrator` | Workflow discovery → active |
-| `wan/*` | Enable PPPoE + auto proxy, create queue, internet probe |
-| `metrics/*` | Router resources, WAN/LAN traffic, proxy BPS, rollup, 3proxy admin |
-| `realtime/HealthMonitor` | Health check định kỳ |
-| `realtime/ProxyPingMonitor` | Ping batch round-robin qua PPPoE |
-| `system/RedeployWebuiService` | Upload tar + recreate container |
-| `system/ClockSyncService` | NTP / timezone VN |
-| `logs/*` | Tail hub logs, top domains |
-| `device/DeviceRoutingService` | LAN device → WAN |
-| `export/ExportService` | Export proxy formats |
-| `auth/AuthService` | Admin argon2 |
+### 6.2 Routes (`backend/src/routes/`)
 
-### Backend — lib quan trọng
+| File | Trách nhiệm |
+|------|-------------|
+| `auth.ts` | Login/logout/me/password/refresh |
+| `proxies.ts` | CRUD + lifecycle + bulk + export/import |
+| `proxyMetrics.ts` | Live/history metrics, limits, uptime |
+| `proxyLogs.ts` | Requests, domains, tail |
+| `wan.ts` | Create queue, enable/disable, bulk |
+| `devices.ts` | Device routes + DHCP leases |
+| `system.ts` | Dashboard, redeploy, scripts, purge, debug |
+| `settings.ts` | Auto-proxy, discovery, provision |
+| `audit.ts` | Audit log list + actions |
 
-- `config.ts` — toàn bộ env typed (hub, LOW_CPU, health, firewall, auto-proxy…)
-- `ipQualityUtils.ts` — `classifyPublicIp`, `isBadWanIp`, `isUsableWanIp`
-- `proxyEgressUtils.ts` — resolve egress name
-- `queue.ts` — serialize lệnh ghi router
-- `hubUtils`, `containerUtils`, `pppoeUtils`, `lanTrafficUtils`, `networkUtils`…
+### 6.3 Services map
 
-### Frontend desktop (`frontend/src`)
+```
+services/
+├── auth/AuthService.ts              # argon2 admin users
+├── audit.ts                         # write + WS audit.created
+├── proxy/
+│   ├── ProxyService.ts              # facade CRUD/apply (hub|legacy)
+│   ├── HubProxyService.ts           # shards, apply slot, reload, LAN
+│   ├── HubConfigService.ts          # 3proxy.cfg + mounts + slot IPs
+│   ├── HubRateLimitService.ts       # speed/quota rules + debounce
+│   └── PoolAllocator.ts             # reassign egress on WAN failure
+├── mikrotik/
+│   ├── MikrotikService.ts           # REST + SSH + containerShell + PPPoE
+│   ├── RouterScriptService.ts       # quayip/duckdns/protect/blacklist
+│   ├── FirewallReconcileService.ts  # periodic repair hub rules
+│   └── SshBlacklistService.ts
+├── auto/
+│   ├── WanWatcherService.ts         # poll WAN, IP quality, finalize
+│   ├── AutoProvisionOrchestrator.ts # discovery workflow states
+│   └── AutoProxySettings.ts
+├── wan/
+│   ├── WanCreateQueue.ts            # sequential create PPPoE
+│   ├── WanEnableService.ts          # enable + auto proxy
+│   └── WanInternetProbe.ts          # ping before finalize
+├── metrics/
+│   ├── DashboardRealtimeService.ts
+│   ├── RouterMonitorService.ts / RouterResourceCollector.ts
+│   ├── RouterTrafficService.ts / LanDeviceTrafficService.ts
+│   ├── ProxyMetricsCollector.ts / LiveBpsTracker.ts
+│   ├── RollupAggregator.ts / LogMetricsDeriver.ts
+│   └── ThreeProxyAdminClient.ts     # admin XML via hub shell
+├── logs/LogTailer.ts · TopDomainAggregator.ts
+├── realtime/HealthMonitor.ts · ProxyPingMonitor.ts
+├── system/ClockSyncService.ts · RedeployWebuiService.ts
+├── device/DeviceRoutingService.ts
+└── export/ExportService.ts
+```
 
-Pages: Dashboard · Proxies · WAN · Devices · Fleet · Audit · Settings · Login.  
-Settings: quản lý **router scripts** (ensure all / run từng script, hiển thị summary & IP đổi).  
-Stack: Ant Design 6, charts, Zustand, WebSocket hooks.
+### 6.4 Lib utilities
 
-### Frontend mobile (`frontend-mobile/src`)
+| File | Vai trò |
+|------|---------|
+| `config.ts` | Toàn bộ env typed |
+| `queue.ts` | Serialize ghi router (`routerQueue`) |
+| `ipQualityUtils.ts` | Phân loại IP WAN |
+| `proxyEgressUtils.ts` | Resolve egress name |
+| `hubUtils.ts` / `hubLimitUtils.ts` | Hub helpers, limits |
+| `containerUtils.ts` | Tên container/shard |
+| `pppoeUtils.ts` | Pool vs management PPPoE |
+| `lanTrafficUtils.ts` | Comment/marker LAN mangle |
+| `firewallCommentUtils.ts` | Comment markers firewall |
+| `networkUtils.ts` | IP/CIDR helpers |
+| `proxyLogParser.ts` | Parse 3proxy logs |
+| `quayipUtils.ts` | Parse quayip output |
+| `metricsBucketUtils.ts` | Buckets rollup |
+| `mikrotikResourceUtils.ts` | Parse resource REST |
+| `validation.ts` / `logger.ts` | Zod + pino |
 
-Cùng luồng trang + More; HeroUI + Tailwind; serve tại **`/m/`**.
+Unit-style tests (chạy ts-node): `*.test.ts` trong lib.
 
-### Setup orchestrator (`setup/`)
+### 6.5 Auth
+
+- JWT trong cookie `token` + Bearer header  
+- Roles: `admin` | `viewer`  
+- Middleware `app.authenticate`  
+- Một số system action: admin only (redeploy, ensure scripts, purge…)  
+
+---
+
+## 7. Frontend desktop
+
+**Path production:** `/`  
+**Stack:** React 18 + Ant Design 6 + plots + Zustand  
+
+### Pages
+
+| Page | File | Chức năng |
+|------|------|-----------|
+| Login | `LoginPage.tsx` | JWT login |
+| Dashboard | `DashboardPage.tsx` | Router monitor, WAN traffic, DHCP, fleet, quick actions |
+| Proxies | `ProxiesPage.tsx` | Table bulk, detail, analytics, limits, connection drawer |
+| WAN | `WanPage.tsx` | PPPoE list, create-next, enable/disable, queue, bulk |
+| Devices | `DevicesPage.tsx` | Device routing CRUD + apply |
+| Fleet | `FleetPage.tsx` | Overview shards/containers |
+| Audit | `AuditPage.tsx` | Lịch sử + filter |
+| Settings | `SettingsPage.tsx` | Auto-proxy + **router scripts ensure/run** |
+
+### Components (chính)
+
+```
+components/
+├── AppLayout.tsx · AppSider.tsx · ErrorBoundary.tsx
+├── IpQualityTag.tsx · EgressTag.tsx · ContainerStatusTag.tsx · ProxyEndpoint.tsx
+├── dashboard/
+│   RouterMonitorPanel · DashboardWanTraffic · DashboardFleetHero
+│   DashboardDhcpClients · DashboardHealthCard · DashboardConnectionCard
+│   DashboardQuickActions · DashboardHeaderToolbar
+├── proxies/
+│   ProxiesDataTable · ProxiesPageView · ProxyDetailPanel
+│   ProxyAnalyticsDrawer · ProxyConnectionDrawer · ProxyModals
+│   ProxyStatusBadge · ProxyAuthCell · ProxyWanCell · ProxyTrafficMini …
+├── proxy/
+│   ProxyPageShell · ProxyTrafficChart · ProxyInlineStats · ProxyStatsRow
+└── ui/
+    MetricCard · PageHeader · AppDrawer · ProxyToolbar · SettingsSectionCard …
+```
+
+### Hooks / services
+
+- `useProxiesPage` — logic trang Proxies  
+- `useWebSocket` — realtime + reconnect  
+- `usePollInterval` · `useSpeedUnit` · table pagination/viewport  
+- `services/api.ts` · `auth.ts` · `ws.ts`  
+- `lib/ipQuality.ts` · `proxyUtils` · `liveMetricsMerge` · `clipboard`  
+
+---
+
+## 8. Frontend mobile
+
+**Path production:** `/m/`  
+**Stack:** React 19 + HeroUI 3 + Tailwind 4 + Motion  
+
+### Pages
+
+Dashboard · Proxies · WAN · Devices · Fleet · Audit · Settings · **More** · Login  
+
+### Layout
+
+- `MobileShell` + `BottomNav` + `MobileHeader`  
+- `SideNav` / wide tables khi màn rộng (`useWideLayout`)  
+- Charts: RingGauge, SparkArea, DualTraffic, HorizontalBar  
+- UI kit: GlassCard, MetricTile, DataTable, FilterChip, ConfirmModal…  
+- Wide tables: Proxies/Wan/Devices/Fleet/Audit DataTable  
+
+Cùng API/WS backend; basename router `/m`.
+
+---
+
+## 9. 3proxy hub
+
+**Image:** `webuiproxymikrotik/3proxy-hub:2`  
+**Build:** `npm run build:3proxy-hub` → `scripts/build-3proxy-hub.sh`  
+**Source:** `docker/3proxy-hub/`
+
+| File | Vai trò |
+|------|---------|
+| `hub-entrypoint.sh` | Gán IP `/32` từ `hub-slot-ips` hoặc `HUB_SLOT_IPS`; exec 3proxy.cfg |
+| `hub-reload.sh` | Reload config (SIGUSR1 pattern) |
+| `hub-admin-fetch.sh` | Helper fetch admin stats |
+
+Backend sinh:
+
+- `3proxy.cfg` multi-slot (users, ports, maxconn, nscache)  
+- Mount từ RouterOS vào container  
+- Debounce reload khi apply hàng loạt (`HUB_RELOAD_DEBOUNCE_MS`)  
+
+---
+
+## 10. MikroTik scripts
+
+Thư mục `mikrotik/` — upload `disk1/webuiproxymikrotik/`.
+
+### `install-all.rsc` thứ tự
+
+1. `ensure-bridge`  
+2. `ensure-veth-for-pppoe`  
+3. `ensure-routing`  
+4. `ensure-dstnat`  
+5. `ensure-firewall`  
+6. `ensure-mgmt-access`  
+7. `ensure-router-scripts` (quayip + duckdns + protect)  
+
+### Toàn bộ script
+
+| Script | Mô tả |
+|--------|--------|
+| `prerequisites.rsc` | Kiểm tra package/container/disk |
+| `ensure-bridge.rsc` | Bridge `containers-veth` |
+| `ensure-veth-for-pppoe.rsc` | Veth slots / hub |
+| `ensure-routing.rsc` | Routing marks + tables |
+| `ensure-dstnat.rsc` | Publish HTTP/SOCKS ports |
+| `ensure-firewall.rsc` | Accept ranges |
+| `ensure-proxy-gateway.rsc` | Gateway IPs trên bridge |
+| `ensure-device-routing.rsc` | Mangle device → WAN |
+| `ensure-ssh-port.rsc` | Đổi port SSH |
+| `ensure-ssh-blacklist.rsc` | Blacklist + scheduler 1m |
+| `ensure-mgmt-access.rsc` | Management access rules |
+| `ensure-pool-pppoe.rsc` | Isolation pool proxy |
+| `ensure-router-scripts.rsc` | Cài script managed |
+| `protect-pppoe-wan.rsc` | Chống disable/xóa pppoe-wan · scheduler 2m |
+| `duckdns-pppoe-wan.rsc` | Update DuckDNS · 5m |
+| **`quayip.rsc`** | Quay IP: **5m**, maxFail **16**, maxPass 60, wait 8s, settle 5s; CGNAT+169.254; exclude pppoe-wan |
+| `reload-ip-pppoe.rsc` | Helper reconnect |
+| `deploy-webui.rsc` | Add/start container webui |
+| `setup-proxy3.rsc` | Legacy per-container setup |
+| `cleanup-proxy.rsc` / `cleanup-firewall-orphan.rsc` | Dọn dẹp |
+
+### Managed từ WebUI (RouterScriptService)
+
+| Name | Label | Interval mặc định |
+|------|--------|-------------------|
+| `quayip` | Quay IP PPPoE | 5m |
+| `duckdns-pppoe-wan` | DuckDNS | 5m |
+| `protect-pppoe-wan` | Bảo vệ pppoe-wan | 2m |
+| `hub-ssh-blacklist` | SSH blacklist | 1m |
+
+API: `GET/POST /api/system/router-scripts*`, `POST .../run/:name`  
+Response: `summary`, `outputLines`, `logLines`, `installChanges`, `ipChanges`.
+
+---
+
+## 11. Setup Windows 1-click
+
+### Yêu cầu
+
+- Windows 10/11, **Run as Administrator**  
+- Docker Desktop + Node 20+ (hoặc winget qua setup)  
+
+### Pipeline `setup/orchestrator.js`
 
 ```
 preflight → network-bootstrap → build → cleanup → upload
   → prerequisites → router → hub-prep → purge → fleet-bootstrap → verify
 ```
 
-### Docker 3proxy hub
+| Step | File | Việc |
+|------|------|------|
+| preflight | `steps/preflight.js` | Node/Docker/Python/SSH |
+| network-bootstrap | `network-bootstrap.js` | WAN/LAN/DHCP/PPPoE nếu `network.configure` |
+| build | `build.js` | Build frontend(s) + docker image tar |
+| cleanup | `cleanup.js` | Dọn disk1 (tuỳ options) |
+| upload | `upload.js` | SCP tar + rsc |
+| prerequisites | `prerequisites.js` | Router ready |
+| router | `router.js` | import install-all, env, container |
+| hub-prep | `hub-prep.js` | Hub image/mounts |
+| purge | `purge.js` | Purge DB nếu fresh |
+| fleet-bootstrap | `fleet-bootstrap.js` | Auto provision proxies running WAN |
+| verify | `verify.js` | Health/dashboard check |
 
-- Mount `3proxy.cfg` + `hub-slot-ips` từ RouterOS
-- Entrypoint gán IP `/32` per slot
-- Reload config không recreate container
-
----
-
-## Yêu cầu hệ thống
-
-### Router
-
-- MikroTik **x86_64**, RouterOS **7.4+**
-- Package **container**
-- Disk trống khuyến nghị **≥ 2 GB** (`disk1`)
-- RAM: ~100 MB WebUI + ~10–30 MB / hub shard
-
-### PC deploy (Windows)
-
-- Windows 10/11, **Administrator**
-- Docker Desktop + Node.js 20+ (hoặc `setup.bat` tự cài qua winget)
-
-### External (tuỳ chọn)
-
-- Host có Docker + kết nối REST/SSH tới router  
-  → `DEPLOY_TARGET=external` + `docker compose up -d`
-
----
-
-## Cài đặt nhanh (Windows 1-click)
-
-### 1. Clone
-
-```bash
-git clone https://github.com/clonethinh/mikrotik-x86-proxy-container.git
-cd mikrotik-x86-proxy-container
-```
-
-### 2. Config (tuỳ chọn)
-
-```bash
-copy setup.config.example.json setup.config.json
-# Sửa: router, sshPass, wan/DuckDNS, adminPass, hub.shardCount, maxPppoeOut…
-```
-
-### 3. Setup
+### Lệnh
 
 ```powershell
-# Run as administrator
 .\setup.bat
+.\setup.bat --wizard-only
+.\setup.bat --preflight-only
+.\setup.bat --skip-build
+.\setup.bat --from upload
+npm run setup
 ```
 
-| Lệnh | Ý nghĩa |
-|------|---------|
-| `npm run setup` | Full setup |
-| `setup.bat --wizard-only` | Chỉ wizard |
-| `setup.bat --preflight-only` | Kiểm tra môi trường |
-| `setup.bat --skip-build` | Bỏ build image |
-| `setup.bat --from upload` | Từ step `upload` |
+### Config
 
-### 4. Trên router
+Copy `setup.config.example.json` → `setup.config.json` (không commit).
 
-```routeros
-/import file=disk1/webuiproxymikrotik/install-all.rsc
-```
-
-### 5. Truy cập
-
-- Desktop: `http://<wan-host-or-ip>:8088`
-- Mobile: `http://<wan-host-or-ip>:8088/m/`
-
-### Deploy lặp (đã có hệ thống)
-
-```bash
-npm run deploy:auto          # SSH hoặc WebUI API + verify + post-deploy bootstrap
-# SKIP_POST_DEPLOY=1 để bỏ sync .rsc/scripts
-```
-
-`scripts/post-deploy-bootstrap.js`: upload `mikrotik/*.rsc` → `POST /api/system/router-scripts/ensure` → sync-time.
+Các khối: `router`, `wan`, `webui`, `network`, `proxy`, `hub`, `threeProxy`, `mode`, `options`, `setup`.
 
 ---
 
-## Cấu hình
+## 12. Cấu hình & biến môi trường
 
-### `setup.config.example.json`
+### 12.1 `backend/.env.example` + `config.ts` (đầy đủ nhóm)
 
-| Khối | Nội dung |
+#### Server / auth / DB
+
+| Biến | Mặc định | Ý nghĩa |
+|------|----------|---------|
+| `NODE_ENV` | production | |
+| `PORT` | 8088 | |
+| `HOST` | 0.0.0.0 | |
+| `LOG_LEVEL` | info / warn nếu LOW_CPU | |
+| `JWT_SECRET` | (required prod) | ≥ 32 chars |
+| `ADMIN_USERNAME` | admin | |
+| `ADMIN_PASSWORD` | changeme123 | |
+| `DATABASE_URL` | file:/data/proxy.db | |
+| `DATA_DIR` | /data | |
+| `DISK1_DIR` | disk1 | |
+
+#### Deploy / MikroTik
+
+| Biến | Mặc định | Ý nghĩa |
+|------|----------|---------|
+| `DEPLOY_TARGET` | router | `router` \| `external` |
+| `MIKROTIK_HOST` | 127.0.0.1 | |
+| `MIKROTIK_API_USER/PASS` | admin / … | REST |
+| `MIKROTIK_REST_PORT` | 80 | |
+| `MIKROTIK_REST_SCHEME` | http | |
+| `MIKROTIK_SSH_PORT` | 22222 | |
+| `MIKROTIK_SSH_USER/PASS` | admin / … | |
+| `MIKROTIK_WAN_IP` | — | deprecated IP tĩnh |
+| `MIKROTIK_WAN_HOST` | — | host quản trị (DuckDNS) |
+| `MIKROTIK_REST_CACHE_MS` | 0 / 8000 LOW_CPU | Cache REST |
+
+#### 3proxy / network ports
+
+| Biến | Mặc định |
 |------|----------|
-| `router` | host, sshUser/Pass, sshPort `22222` |
-| `wan` | host public, management PPPoE, DuckDNS |
-| `webui` | admin, jwtSecret, port `8088` |
-| `network` | WAN/LAN ports, DHCP, bridge, ext port base |
-| `proxy.deployMode` | `"hub"` (khuyến nghị) |
-| `hub` | `shardSize` (50), `shardCount`, `maxPppoeOut` |
-| `threeProxy` | tarball + hub image |
-| `setup` | fullSystem, autoProvision, initialProxyCount… |
+| `THREEPROXY_IMAGE` | ghcr.io/tarampampam/3proxy:2 |
+| `THREEPROXY_TARBALL` | disk1/3proxy.tar |
+| `THREEPROXY_HUB_IMAGE` | webuiproxymikrotik/3proxy-hub:2 |
+| `THREEPROXY_HUB_TARBALL` | disk1/3proxy-hub.tar |
+| `PROXY_HTTP_PORT_BASE` | 20000 |
+| `PROXY_SOCKS_PORT_BASE` | 21000 |
+| `EXT_HTTP_PORT_BASE` | 30055 |
+| `EXT_SOCKS_PORT_BASE` | 31055 |
+| `VETH_NETWORK_BASE` | 172.18 |
+| `BRIDGE_NAME` | containers-veth |
+| `LAN_SUBNETS` | 192.168.88.0/24,192.168.39.0/24 |
+| `LAN_INTERFACES` | ether1,ether2 |
+| `CONTAINER_CIDR` | 172.16.0.0/12 |
 
-**Không commit:** `setup.config.json`, `.env`, `router-access.json` (đã `.gitignore`).
+#### Hub scale
 
-### Backend env (rút gọn — xem `backend/.env.example`)
+| Biến | Mặc định |
+|------|----------|
+| `PROXY_DEPLOY_MODE` | hub |
+| `HUB_SHARD_SIZE` | 50 |
+| `HUB_SHARD_COUNT` | 6 |
+| `HUB_MAX_PPPOE_OUT` | 300 |
+| `HUB_MAXCONN_MIN` | 512 |
+| `HUB_MAXCONN_PER_SLOT` | 64 |
+| `HUB_NSCACHE` | 65536 / 8192 LOW_CPU |
+| `HUB_FAST_IP_PEEK_MS` | 0 |
+| `HUB_RELOAD_DEBOUNCE_MS` | 2500 |
+| `HUB_APPLY_FLUSH_MS` | 600 |
+| `HUB_REPAIR_ALL_ON_APPLY` | false |
+| `HUB_RATE_LIMIT_ON_APPLY` | true |
+| `HUB_RATE_LIMIT_DEBOUNCE_MS` | 2500 / **15000** LOW_CPU |
 
-```env
-PORT=8088
-DEPLOY_TARGET=router                 # router | external
-PROXY_DEPLOY_MODE=hub
+#### LOW_CPU / logs / metrics
 
-MIKROTIK_HOST=127.0.0.1              # external: IP router
-MIKROTIK_SSH_PORT=22222
-MIKROTIK_API_PASS=...
-MIKROTIK_SSH_PASS=...
-MIKROTIK_WAN_HOST=your.duckdns.org   # URL quản trị
+| Biến | Khi LOW_CPU |
+|------|-------------|
+| `LOW_CPU_MODE=true` | bật gói tối ưu |
+| `HUB_REQUEST_LOG` | default off (bật = true) |
+| `LOGS_TAIL_ENABLED` | default off |
+| `METRICS_ENABLED` | default off |
+| `CONTAINER_LOGGING` | false |
+| `LOG_LEVEL` | warn |
 
-JWT_SECRET=...                       # ≥ 32 ký tự
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=...
-DATABASE_URL=file:/data/proxy.db
+#### Health / ping / WAN probe
 
-# Scale hub
-HUB_SHARD_SIZE=50
-HUB_SHARD_COUNT=6
-HUB_MAX_PPPOE_OUT=300
+| Biến | Mặc định |
+|------|----------|
+| `HEALTH_CHECK_INTERVAL_MS` | 90000 / 120000 LOW_CPU |
+| `HEALTH_CHECK_TIMEOUT_MS` | 30000 |
+| `HEALTH_SKIP_WAN_SYNC` | true (tránh double poll) |
+| `PROXY_PING_ENABLED` | true |
+| `PROXY_PING_INTERVAL_MS` | 30000 / 45000 LOW_CPU |
+| `HEALTH_PING_BATCH_SIZE` | 6 |
+| `WAN_PING_ON_IP` | true |
+| `WAN_PING_TARGET` | 1.1.1.1 |
 
-# CPU router
-# LOW_CPU_MODE=true
-# HUB_REQUEST_LOG=false
-# METRICS_ENABLED=false
-# LOGS_TAIL_ENABLED=false
-# HUB_RATE_LIMIT_DEBOUNCE_MS=15000   # auto 15s khi LOW_CPU
+#### Auto proxy
 
-# Health / ping
-HEALTH_CHECK_INTERVAL_MS=120000
-PROXY_PING_ENABLED=true
-PROXY_PING_INTERVAL_MS=45000
-HEALTH_PING_BATCH_SIZE=6
+| Biến | Mặc định |
+|------|----------|
+| `AUTO_PROXY_MODE` | semi (`off`\|`semi`\|`full`) |
+| `AUTO_PROXY_POLL_MS` | 20000 / 30000 LOW_CPU (deploy scale: 15000) |
+| `AUTO_PROXY_COUNTDOWN_MS` | 8000 |
+| `AUTO_PROXY_MAX_CONCURRENT` | 16 |
+| `AUTO_PROXY_STALE_TTL_MS` | 120000 |
 
-# Auto proxy
-AUTO_PROXY_MODE=semi                 # off | semi | full
-AUTO_PROXY_POLL_MS=20000             # LOW_CPU default 30000; deploy scale dùng 15000
+#### Firewall reconcile / SSH blacklist / clock
 
-# Firewall reconcile
-# FIREWALL_RECONCILE_ENABLED=true
-# FIREWALL_RECONCILE_INTERVAL_MS=1800000
+| Biến | Ghi chú |
+|------|---------|
+| `FIREWALL_RECONCILE_ENABLED` | LOW_CPU: opt-in true |
+| `FIREWALL_RECONCILE_INTERVAL_MS` | 900000 / 1800000 |
+| `FIREWALL_RECONCILE_MAX_SLOTS` | 15 |
+| `SSH_BLACKLIST_ENABLED` | true |
+| `SSH_BLACKLIST_MAX_FAILURES` | 5 |
+| `CLOCK_TIMEZONE` | Asia/Ho_Chi_Minh |
+| `CLOCK_NTP_SERVERS` | vn.pool.ntp.org,… |
+| `ENABLE_REALTIME` | true |
+| `WS_PATH` | /ws |
+| `TELEGRAM_BOT_TOKEN/CHAT_ID` | optional alert |
 
-EXT_HTTP_PORT_BASE=30055
-EXT_SOCKS_PORT_BASE=31055
-CLOCK_TIMEZONE=Asia/Ho_Chi_Minh
-```
+### 12.2 Docker Compose external
 
-### Docker Compose (external)
-
-```bash
+```yaml
+# docker-compose.yml
+# ports 8088, volume ./data, env MIKROTIK_* + JWT + ADMIN
 docker compose up -d --build
-# Port 8088, volume ./data, env MIKROTIK_* từ host
 ```
 
 ---
 
-## WebUI
+## 13. API REST đầy đủ
 
-| Trang | Chức năng |
-|-------|-----------|
-| **Dashboard** | CPU/Mem/HDD, container count, WAN traffic, LAN talkers, fleet |
-| **Proxies** | CRUD, bulk, test, reload-IP, export, rate limit, analytics, logs |
-| **WAN** | PPPoE status, create-next, enable (auto proxy), disable, queue, bulk |
-| **Devices** | Routing LAN → WAN (IP/MAC/DHCP) |
-| **Fleet** | Tổng quan shard / container / proxy |
-| **Audit** | Lịch sử thao tác |
-| **Settings** | Auto-proxy · **Router scripts** (ensure/run + kết quả chi tiết) · system |
-| **Login** | JWT cookie |
-
-Mobile mirror tại `/m/`.
-
----
-
-## API REST & WebSocket
-
-Base: `http://<host>:8088` — JWT cookie `token` hoặc `Authorization: Bearer`.
+Base: `http://<host>:8088`  
+Auth: cookie `token` hoặc `Authorization: Bearer <jwt>` (trừ login + health).
 
 ### Auth
 
-| Method | Path |
-|--------|------|
-| POST | `/api/auth/login` |
-| POST | `/api/auth/logout` |
-| GET | `/api/auth/me` |
-| POST | `/api/auth/change-password` |
-| POST | `/api/auth/refresh` |
+| Method | Path | Mô tả |
+|--------|------|--------|
+| POST | `/api/auth/login` | `{username,password}` → token |
+| POST | `/api/auth/logout` | |
+| GET | `/api/auth/me` | User hiện tại |
+| POST | `/api/auth/change-password` | |
+| POST | `/api/auth/refresh` | |
 
 ### Proxies
 
 | Method | Path | Mô tả |
 |--------|------|--------|
-| GET/POST | `/api/proxies` | List / tạo |
-| GET/PATCH/DELETE | `/api/proxies/:id` | Chi tiết / sửa / xoá |
-| POST | `/api/proxies/:id/start\|stop\|restart` | Điều khiển |
-| POST | `/api/proxies/:id/reload-ip` | Quay IP |
+| GET | `/api/proxies` | List (+ query filter) |
+| POST | `/api/proxies` | Tạo |
+| GET | `/api/proxies/:id` | Chi tiết |
+| PATCH | `/api/proxies/:id` | Cập nhật |
+| DELETE | `/api/proxies/:id` | Xoá |
+| GET | `/api/proxies/:id/password` | Reveal password (audit) |
+| POST | `/api/proxies/:id/start` | |
+| POST | `/api/proxies/:id/stop` | |
+| POST | `/api/proxies/:id/restart` | |
+| POST | `/api/proxies/:id/reload-ip` | Quay IP PPPoE |
 | POST | `/api/proxies/:id/test` | Health / exit IP |
-| POST | `/api/proxies/:id/reapply` | Re-apply rules |
+| POST | `/api/proxies/:id/reapply` | Re-apply router rules |
+| GET | `/api/proxies/:id/ip-history` | |
+| GET | `/api/proxies/:id/health-history` | |
+| GET | `/api/proxies/:id/logs` | |
 | POST | `/api/proxies/bulk` | Bulk actions |
-| POST | `/api/proxies/export` · `/import` | Xuất / nhập |
-| GET | `/api/proxies/:id/metrics/*` | Live / history |
-| PATCH | `/api/proxies/:id/limits` | Rate limit & quota |
-| GET | `/api/proxies/:id/logs/*` | Requests / domains / tail |
+| POST | `/api/proxies/bulk-update-credentials` | |
+| POST | `/api/proxies/regenerate-credentials` | |
+| POST | `/api/proxies/export` | Export formats |
+| POST | `/api/proxies/import` | Import |
 
-### WAN · Devices · System
+### Metrics & limits & logs
+
+| Method | Path |
+|--------|------|
+| GET | `/api/proxies/metrics/live-all` |
+| GET | `/api/proxies/:id/metrics/live` |
+| GET | `/api/proxies/:id/metrics/history` |
+| GET | `/api/proxies/:id/uptime` |
+| GET/PATCH | `/api/proxies/:id/limits` |
+| GET | `/api/proxies/:id/logs/requests` |
+| GET | `/api/proxies/:id/logs/domains` |
+| GET | `/api/proxies/:id/logs/tail` |
+
+### WAN
 
 | Method | Path | Mô tả |
 |--------|------|--------|
-| GET | `/api/wan` | PPPoE status |
-| GET | `/api/wan/create-queue` | Hàng đợi tạo WAN |
-| POST | `/api/wan/create-next` · `/create` | Tạo PPPoE |
-| POST | `/api/wan/:idx/enable\|disable` | Bật / tắt |
-| POST | `/api/wan/bulk-enable` · `/bulk-disable` | Bulk |
-| GET/POST | `/api/devices` | Device routing |
-| GET | `/api/dashboard` · `/dashboard/router-monitor` | Dashboard |
-| GET/POST | `/api/system/router-scripts` · `/ensure` · `/run/:name` | Scripts RouterOS |
-| POST | `/api/system/redeploy-webui` | Redeploy image |
-| GET/POST | `/api/system/firewall/reconcile` | Firewall |
-| GET/POST | `/api/system/ssh-blacklist*` | SSH protect |
-| POST | `/api/mikrotik/sync-time` | Đồng bộ giờ |
-| GET | `/api/health` | Public health |
+| GET | `/api/wan` | PPPoE status (cũng có trong system) |
+| GET | `/api/wan/create-queue` | Queue status |
+| POST | `/api/wan/create-next` | Tạo out tiếp theo `{enable,createProxy}` |
+| POST | `/api/wan/create` | Tạo idx chỉ định |
+| POST | `/api/wan/:idx/enable` | Bật + auto proxy (async WS) |
+| POST | `/api/wan/:idx/disable` | Tắt (không xoá proxy) |
+| POST | `/api/wan/bulk-enable` | |
+| POST | `/api/wan/bulk-disable` | |
+| GET | `/api/wan/discovery` | Discovery states |
+| POST | `/api/wan/:idx/provision/now` | |
+| POST | `/api/wan/:idx/provision/cancel` | |
 
-### WebSocket `WS /ws`
+### Devices
 
-| Event | Ý nghĩa |
+| Method | Path |
+|--------|------|
+| GET | `/api/devices` |
+| GET | `/api/devices/dhcp-leases` |
+| GET/POST | `/api/devices` · `/:id` |
+| PATCH/DELETE | `/api/devices/:id` |
+| POST | `/api/devices/:id/apply` |
+
+### System / dashboard / ops
+
+| Method | Path | Mô tả |
+|--------|------|--------|
+| GET | `/api/health` | **Public** ok/uptime/clients |
+| GET | `/api/dashboard` | Aggregate dashboard |
+| GET | `/api/dashboard/router-monitor` | CPU/Mem samples |
+| GET | `/api/mikrotik/system` | Router identity/resource |
+| GET | `/api/deploy-info` | Deploy metadata |
+| POST | `/api/mikrotik/test` | Test REST/SSH |
+| GET | `/api/system/clock` | |
+| POST | `/api/mikrotik/sync-time` | NTP sync |
+| GET/POST | `/api/system/firewall/reconcile` | |
+| GET/POST | `/api/system/ssh-blacklist` · `/ensure` | |
+| GET | `/api/system/router-scripts` | Status list |
+| POST | `/api/system/router-scripts/ensure` | Import/update all |
+| POST | `/api/system/router-scripts/run/:name` | Run script |
+| POST | `/api/system/redeploy-webui` | Body: image tar stream |
+| POST | `/api/system/purge-fleet` | Xoá fleet proxies |
+| POST | `/api/system/purge-wan-state` | Clear discovery/wan state |
+| POST | `/api/system/logs/tail` · `/aggregate` | Manual trigger |
+| POST | `/api/system/metrics/rollup` | |
+| GET | `/api/debug/network` | Debug routes/IPs |
+
+### Settings & audit
+
+| Method | Path |
+|--------|------|
+| GET/PATCH | `/api/settings/auto-proxy` |
+| GET | `/api/audit` |
+| GET | `/api/audit/actions` |
+
+---
+
+## 14. WebSocket events
+
+**Endpoint:** `WS /ws` (auth token query/header theo handler)  
+**Replay:** ~100 events khi reconnect  
+**Ping:** client `ping` → server `pong`
+
+### Proxy
+
+| Event | Khi nào |
 |-------|---------|
 | `proxy.created` / `updated` / `deleted` | CRUD |
-| `proxy.status` | start/stop |
-| `proxy.reloading` / `proxy.ip-changed` | Quay IP |
-| `proxy.health` / `proxy.error` / `proxy.applied` | Health / apply |
-| `wan.sync` / `wan.ip-changed` | Đồng bộ PPPoE |
+| `proxy.status` | start/stop/pending |
+| `proxy.reloading` / `proxy.ip-changed` | reload-ip |
+| `proxy.health` / `proxy.error` / `proxy.applied` | health / apply |
+| `proxy.metrics` | live BPS push |
 
-Buffer ~100 events replay khi reconnect.
+### WAN / provision
 
----
-
-## Mô hình dữ liệu (Prisma)
-
-| Model | Vai trò |
+| Event | Khi nào |
 |-------|---------|
-| `ProxyUser` | Slot proxy: ports, creds, publicIp, **egressPppoeName**, status, note |
-| `ProxyLimit` | Quota / speed / max conn / hours / expires |
-| `ProxyTrafficSample` | Sample realtime rx/tx BPS |
-| `ProxyTrafficRollup` | Rollup hour/day/week/month |
-| `ProxyRequestLog` | Request client → dest |
-| `ProxyDomainStats` | Top domain theo ngày |
-| `IpHistory` | Lịch sử đổi IP |
-| `HealthCheck` | Kết quả test |
-| `AuditLog` | Audit thao tác |
-| `AdminUser` | Admin (argon2) |
-| `Setting` | Key-value |
-| `WanStatus` | Snapshot PPPoE |
-| `WanDiscovery` | Workflow auto-provision |
-| `DeviceRoute` | Routing thiết bị LAN |
-| `RouterResourceSample` | CPU/Mem/HDD samples |
+| `wan.sync` | Sync list PPPoE |
+| `wan.poll` | Mỗi tick watcher |
+| `wan.discovered` / `wan.gone` / `wan.stale` | Lifecycle |
+| `wan.ip-changed` | IP interface đổi |
+| `wan.internet-pending` / `wan.internet-up` | Probe |
+| `wan.action` | enable/disable progress |
+| `wan.bulk` | bulk enable/disable |
+| `wan.create.queue` / `.queued` / `.processing` / `.done` / `.error` | Create queue |
+| `wan.created` | PPPoE tạo xong |
+| `wan.provision.*` | countdown/start/done/error/cancel/queued/warn |
+| `wan.purged` | purge-wan-state |
 
-DB: `/data/proxy.db` (mount `disk1/data`). Startup tự `prisma db push`.
+### Device / fleet / audit
 
----
-
-## MikroTik scripts
-
-Thư mục `mikrotik/` — import gói qua `install-all.rsc` hoặc post-deploy bootstrap.
-
-| Script | Chức năng |
-|--------|-----------|
-| `prerequisites.rsc` | Kiểm tra package/container/disk |
-| `ensure-bridge.rsc` | Bridge `containers-veth` |
-| `ensure-veth-for-pppoe.rsc` | Veth per PPPoE / hub |
-| `ensure-routing.rsc` | Routing mark + tables |
-| `ensure-dstnat.rsc` | Publish HTTP/SOCKS |
-| `ensure-firewall.rsc` | Accept proxy ranges |
-| `ensure-proxy-gateway.rsc` | Gateway trên bridge |
-| `ensure-device-routing.rsc` | Mangle device → WAN |
-| `ensure-ssh-port.rsc` | SSH port (vd. 22222) |
-| `ensure-ssh-blacklist.rsc` | Chống brute-force (+ scheduler) |
-| `ensure-mgmt-access.rsc` | Management access |
-| `ensure-pool-pppoe.rsc` | Pool PPPoE |
-| `ensure-router-scripts.rsc` | Đăng ký script API |
-| `protect-pppoe-wan.rsc` | Không disable/xóa WAN quản trị |
-| `duckdns-pppoe-wan.rsc` | Cập nhật DuckDNS |
-| **`quayip.rsc`** | Quay IP: scheduler **5m**, max **16** lần/phiên, CGNAT+169.254, bỏ qua pppoe-wan |
-| `reload-ip-pppoe.rsc` | Reconnect PPPoE helper |
-| `deploy-webui.rsc` | Deploy container WebUI |
-| `setup-proxy3.rsc` | Setup 3proxy legacy |
-| `cleanup-*.rsc` | Dọn orphan / proxy cũ |
-
-**Managed từ WebUI Settings** (RouterScriptService):
-
-1. `quayip` — 5m  
-2. `duckdns-pppoe-wan` — 5m  
-3. `protect-pppoe-wan` — 2m  
-4. `hub-ssh-blacklist` — 1m  
+| Event | Khi nào |
+|-------|---------|
+| `device.created` / `updated` / `deleted` / `applied` / `error` | Device routing |
+| `fleet.purged` | purge-fleet |
+| `audit.created` | Mọi audit write |
 
 ---
 
-## Scripts & automation
+## 15. Mô hình dữ liệu Prisma
 
-### npm (root)
+File: `backend/prisma/schema.prisma` · DB SQLite.
 
-```bash
-npm run setup                 # setup.bat full
-npm run setup:wizard
-npm run setup:preflight
-npm run setup:skip-build
-npm run build                 # build images (setup step)
-npm run build:3proxy-hub
-npm run deploy:wan            # deploy-via-rest.js
-npm run deploy:auto           # deploy-auto + verify + post-deploy
-npm run deploy:bootstrap
-npm run cleanup:disk1
-npm run cleanup:firewall
-npm run restore:webui
+| Model | Fields chính | Quan hệ |
+|-------|--------------|---------|
+| **ProxyUser** | pppoeIdx, pppoeName, **egressPppoeName**, veth*, ports, containerName, username/password, publicIp, note, enabled, status, statusMessage, lastCheck* | 1-n history/health/traffic/logs; 1-1 limit |
+| **ProxyLimit** | quota*Mb, speed*Kbps, maxConnections, allowedHours JSON, expiresAt | → ProxyUser |
+| **ProxyTrafficSample** | ts, rx/tx Bytes+Bps, clients | |
+| **ProxyTrafficRollup** | period hour\|day\|week\|month, bucket, bytes, requests, errors | unique(proxy,period,bucket) |
+| **ProxyRequestLog** | clientIp, destHost/Port, bytes, errorCode, duration | |
+| **ProxyDomainStats** | daily bucket, domain, hits, bytes | |
+| **IpHistory** | old/new IP, source | |
+| **HealthCheck** | ok, latencyMs, exitIp, error | |
+| **AuditLog** | username, action, resource, details JSON, ip | |
+| **AdminUser** | username, passwordHash, role admin\|viewer | |
+| **Setting** | key-value | |
+| **WanStatus** | pppoeName, isUp, publicIp, uptime, rx/tx | |
+| **WanDiscovery** | workflowState: discovered→countdown→provisioning→active\|queued\|stale\|gone\|error\|skipped | |
+| **DeviceRoute** | matchType ip\|mac\|dhcp, pppoe*, applied | |
+| **RouterResourceSample** | cpu, mem, hdd, uptime, container counts | |
+
+Startup: `prisma db push --accept-data-loss` (idempotent schema sync).
+
+---
+
+## 16. Export / Import proxy
+
+### Formats (`ExportService`)
+
+| Format | Ví dụ dòng |
+|--------|------------|
+| `ipportuserpass` | `1.2.3.4:30056:user:pass` |
+| `userpassipport` | `user:pass@1.2.3.4:30056` |
+| `httpurl` | `http://user:pass@1.2.3.4:30056` |
+| `socks5url` | `socks5://user:pass@1.2.3.4:31056` |
+| `ipport` | `1.2.3.4:30056` |
+| `template` | Custom `{scheme}://{user}:{pass}@{ip}:{port}` |
+
+File download: `txt` | `csv` | `json`  
+Option `includeSocks` để xuất thêm dòng SOCKS.
+
+---
+
+## 17. Background services & boot sequence
+
+Chỉ khi process start (và `DEPLOY_TARGET=router` cho nhóm router-specific):
+
+```
+listen :8088
+  ├─ startHealthMonitor
+  ├─ startProxyPingMonitor
+  ├─ startProxyMetricsCollector
+  ├─ startRouterResourceCollector
+  ├─ startRouterTrafficCollector
+  ├─ startLanDeviceTrafficCollector
+  ├─ startRollupAggregator
+  ├─ startLogTailer
+  ├─ startTopDomainAggregator
+  ├─ startClockSyncOnBoot
+  └─ [router]
+       ├─ startWanWatcher
+       ├─ router-scripts ensureInstalled
+       ├─ sshBlacklist ensure
+       ├─ ensurePoolPppoeIsolation
+       ├─ deviceRouting repairAll
+       ├─ [hub] ensure mounts × shardCount
+       ├─ [hub] ensureAllHubShards + warm cache + LAN access
+       ├─ [hub] sync request-log cfg + reload shards
+       ├─ [hub] startFirewallReconcile
+       └─ self-watchdog interval 60s
 ```
 
-### Scripts vận hành (`scripts/`)
+**Self-watchdog:** nếu container `webuiproxymikrotik` stopped/failed và `routerQueue` rỗng → SSH `/container/start`.  
+Tránh restart khi đang apply proxy (queue > 0).
+
+**Router queue:** mọi thao tác ghi MikroTik đi qua `routerQueue` — serial, giảm race/CPU spike.
+
+---
+
+## 18. Scripts vận hành
+
+### npm root
+
+| Script | Lệnh |
+|--------|------|
+| `npm run setup` | setup.bat full |
+| `npm run setup:wizard` | wizard only |
+| `npm run setup:preflight` | preflight |
+| `npm run setup:skip-build` | skip docker build |
+| `npm run build` | setup/steps/build.js |
+| `npm run build:3proxy-hub` | build hub image |
+| `npm run deploy:wan` | deploy-via-rest |
+| `npm run deploy:auto` | deploy-auto + verify + **post-deploy** |
+| `npm run deploy:bootstrap` | bootstrap redeploy REST |
+| `npm run cleanup:disk1` | |
+| `npm run cleanup:firewall` | |
+| `npm run restore:webui` | HTTP restore bootstrap |
+
+### `scripts/` quan trọng
 
 | Script | Mục đích |
 |--------|----------|
-| `deploy.sh` / `deploy-auto.js` | Deploy WebUI (SSH / API) |
-| **`post-deploy-bootstrap.js`** | Sync `mikrotik/*.rsc` + ensure router-scripts + clock |
-| `deploy-via-rest.js` | Deploy qua REST |
-| `bootstrap-redeploy-via-rest.js` | Redeploy bootstrap |
-| `redeploy-webui-only.js` | Chỉ redeploy WebUI |
-| `apply-scale-300.js` | Env hub 6 shard × 50, max 300 PPPoE, LOW_CPU |
-| `apply-lan-traffic-rules.js` | Mangle LAN traffic |
-| `apply-proxy-rate-limit.js` | Rate limit |
-| `apply-ssh-blacklist.js` | SSH blacklist |
-| `apply-low-cpu-env.js` | Bật LOW_CPU_MODE |
-| `cleanup-disk1.js` / `cleanup-firewall-redundant.js` | Dọn dẹp |
+| `deploy.sh` | SSH pipeline recreate container + env scale |
+| `deploy-auto.js` | Auto: SSH hoặc WebUI API hoặc REST tunnel |
+| **`post-deploy-bootstrap.js`** | Upload all `mikrotik/*.rsc` + ensure scripts + sync-time (`SKIP_POST_DEPLOY=1` để bỏ) |
+| `deploy-via-rest.js` | REST-only deploy |
+| `redeploy-webui-only.js` | Chỉ WebUI |
+| `bootstrap-redeploy-via-rest.js` | Bootstrap path |
+| `restore-webui-bootstrap-http.js` | Restore HTTP |
+| `apply-scale-300.js` | 6×50 hub, max 300, LOW_CPU env |
+| `apply-low-cpu-env.js` | Bật LOW_CPU trên container |
+| `apply-lan-traffic-rules.js` | Mangle LAN |
+| `apply-proxy-rate-limit.js` | Rate limits |
+| `apply-ssh-blacklist.js` | SSH BL |
+| `cleanup-disk1.js` · `cleanup-firewall-redundant.js` · `cleanup-rate-limit-filters.js` | Cleanup |
 | `enable-proxy-metrics.js` | Bật metrics |
-| `diag-cpu-deep*.js` / `load-test-cpu.js` | Chẩn đoán tải |
-| `ensure-windows-prereqs.ps1` | Prereq Windows |
-| `build-3proxy-hub.sh` | Build hub image |
-| `verify-dashboard-live.sh` | Verify dashboard |
-| `lib/deploy-config.js` | Config deploy chung (env container) |
+| `diag-cpu-deep*.js` · `load-test-cpu.js` · `probe-*.js` | Diagnose |
+| `build-3proxy-hub.sh` | Build hub |
+| `verify-dashboard-live.sh` | Smoke dashboard |
+| `ensure-windows-prereqs.ps1` | Winget deps |
+| `lib/deploy-config.js` | Shared host/pass/env builder |
 
-Backend: `backend/scripts/*` (audit, cleanup fleet, reset admin password, sync containers…).
+### `backend/scripts/` (một lần / repair)
+
+audit-firewall, cleanup-fleet/orphans/nat, deploy-full, fix-db-*, purge-*, reset-admin-password, repair-*, sync-containers, test-all-proxies, upload-db, v.v.
 
 ---
 
-## Chế độ deploy & scale
+## 19. Chế độ deploy & scale
 
-### 1) Trên router (mặc định production)
+### A. Production trên router
 
 ```
 DEPLOY_TARGET=router
-MIKROTIK_HOST=127.0.0.1   # hoặc 172.17.0.1 từ container webui
+MIKROTIK_HOST=172.17.0.1   # từ webui container → bridge
 PROXY_DEPLOY_MODE=hub
 ```
 
-### 2) External (VPS / PC)
+### B. External VPS/PC
 
 ```
 DEPLOY_TARGET=external
-MIKROTIK_HOST=<ip-router>
+MIKROTIK_HOST=<router-ip>
 docker compose up -d
 ```
 
-API contract giữ nguyên 100%.
+API/UI contract **giống 100%**.
 
-### 3) Hub vs legacy
-
-| Mode | Mô tả | Khi dùng |
-|------|--------|----------|
-| **hub** (mặc định) | Vài shard, mỗi shard nhiều slot | 50–300+ PPPoE |
-| **legacy** | 1 container 3proxy / 1 WAN | Fleet nhỏ / debug |
-
-### Scale mẫu 300 WAN
+### C. Scale 300 WAN
 
 ```bash
 node scripts/apply-scale-300.js
-# HUB_SHARD_COUNT=6, HUB_SHARD_SIZE=50, HUB_MAX_PPPOE_OUT=300
-# LOW_CPU_MODE=true, poll/cache tối ưu
+# HUB_SHARD_COUNT=6 HUB_SHARD_SIZE=50 HUB_MAX_PPPOE_OUT=300
+# LOW_CPU_MODE=true, AUTO_PROXY_POLL_MS=15000, REST_CACHE=10000, rate-limit debounce 15s
+```
+
+### D. Redeploy code (giữ DB)
+
+```bash
+npm run deploy:auto
+# 1) build/upload tar (hoặc dùng tar sẵn)
+# 2) recreate container, mount /data giữ proxy.db
+# 3) verify dashboard
+# 4) post-deploy-bootstrap (rsc + scripts)
+```
+
+### E. Fresh setup router mới
+
+```powershell
+.\setup.bat   # fullSystem + fleet bootstrap
 ```
 
 ---
 
-## Background services
-
-Chạy khi WebUI container start (`server.ts`):
-
-| Service | Việc làm |
-|---------|----------|
-| WanWatcher | Poll PPPoE, IP quality, finalize/reallocate, WS events |
-| HealthMonitor | Test proxy / exit IP định kỳ |
-| ProxyPingMonitor | Ping batch qua interface PPPoE |
-| ProxyMetricsCollector + Rollup | BPS + rollup (tắt bớt khi LOW_CPU) |
-| RouterResourceCollector | CPU/Mem/HDD |
-| RouterTraffic + LanDeviceTraffic | Traffic WAN / LAN |
-| LogTailer + TopDomainAggregator | Request log hub (tuỳ env) |
-| FirewallReconcile | Repair rule hub theo interval |
-| ClockSync | NTP timezone VN |
-| Hub bootstrap | Ensure shards, mounts, LAN access, request-log sync |
-
-Router queue (`lib/queue.ts`) serialize lệnh ghi MikroTik — tránh race.
-
----
-
-## Phát triển local
+## 20. Phát triển local
 
 ```bash
 # Backend
-cd backend && cp .env.example .env && npm install
-npx prisma generate && npm run dev     # :8088
+cd backend
+cp .env.example .env   # chỉnh MIKROTIK_* nếu test router thật
+npm install
+npx prisma generate
+npm run dev            # ts-node-dev :8088
 
-# Frontend desktop
+# Desktop
 cd frontend && npm install && npm run dev
 
-# Frontend mobile
+# Mobile
 cd frontend-mobile && npm install && npm run dev
 
-# Build dist trước Docker
+# Unit-ish lib tests
+cd backend && npx ts-node src/lib/ipQualityUtils.test.ts
+npx ts-node src/lib/networkUtils.test.ts
+# ... metricsBucket, proxyEgress, proxyLogParser
+
+# Production dists (bắt buộc trước docker build)
 cd frontend && npm run build
 cd ../frontend-mobile && npm run build
 
-# Image RouterOS x86
+# Image amd64 cho RouterOS
 docker buildx build --platform linux/amd64 -t webuiproxymikrotik:latest --load .
 ```
 
-CI: GitHub Actions build backend + frontend trên push/PR `main`.
+**Dockerfile highlights:**
+
+- Stage builder: npm ci, prisma generate, tsc, prune, copy frontend dist + mobile dist  
+- Runtime: tini, entrypoint thêm route `172.16.0.0/12` via bridge để webui reach hub subnets  
+- USER root entrypoint → drop to node cho app  
+- VOLUME `/data`, EXPOSE 8088  
+
+**CI:** `.github/workflows/ci.yml` — Node 20, build backend + frontend on push/PR `main`.
 
 ---
 
-## Troubleshooting
+## 21. Troubleshooting
 
-| Vấn đề | Hướng xử lý |
-|--------|-------------|
-| SSH timeout | `ssh -p 22222 admin@host`; kiểm tra `MIKROTIK_SSH_PORT` + blacklist |
-| Container không start | Image tar, mount `disk1/data`, bridge, root-dir |
-| Proxy sai IP / không ra net | Mangle routing-mark, route `to_pppoeN`, srcnat, PPPoE running |
-| IP CGNAT / 169.254 | quayip tự quay; watcher không finalize; kiểm tra Settings → Run quayip |
-| WebUI không load | Container running? dstnat/firewall 8088? |
-| CPU router cao | `LOW_CPU_MODE=true`, tắt metrics/log, hub mode, giảm poll |
-| Deploy mất kết nối | Không disable `pppoe-wan`; deploy qua LAN hoặc REST |
-| Settings script lỗi | `post-deploy-bootstrap` / ensure scripts; `.rsc` trên `disk1/webuiproxymikrotik/` |
-| Setup Windows fail | Admin + Docker running; `--preflight-only` |
-| Mobile blank | Build `frontend-mobile` trước image; URL `/m/` |
-| DB schema | Volume `/data` writable; startup `prisma db push` |
+| Triệu chứng | Nguyên nhân / xử lý |
+|-------------|---------------------|
+| SSH timeout | Port 22222? Blacklist? `MIKROTIK_SSH_PORT` |
+| Container không start | tar image, root-dir, mount data, bridge |
+| Proxy không ra net | mangle mark, route table, srcnat, PPPoE running |
+| Exit IP sai / CGNAT | quayip Settings → Run; watcher không finalize IP xấu |
+| 169.254 trên WAN | quayip maxFail 16; kiểm tra line PPPoE |
+| WebUI 502 / blank | container status; dstnat 8088; self-watchdog log |
+| Mobile blank | chưa build mobile vào image; URL phải `/m/` |
+| CPU cao | `LOW_CPU_MODE=true`; tắt metrics/logs; tăng poll; hub |
+| Deploy mất remote | không disable pppoe-wan; protect script; deploy LAN |
+| Script ensure fail | post-deploy-bootstrap; file trên disk1/webuiproxymikrotik/ |
+| DB lỗi schema | `/data` writable; xem log prisma db push |
+| containerShell empty | hub không running — skip an toàn |
+| Rate limit chậm apply | debounce 15s LOW_CPU — đợi hoặc tắt LOW_CPU |
+| Setup Windows fail | Admin + Docker running + preflight |
 
-Chi tiết RouterOS: [`docs/routeros-commands.md`](docs/routeros-commands.md).
+RouterOS cheat sheet: [`docs/routeros-commands.md`](docs/routeros-commands.md).
 
 ---
 
-## Bảo mật
+## 22. Bảo mật & .gitignore
 
-**Không đẩy GitHub** (`.gitignore`):
+### Không bao giờ commit
 
-- `.env*`, `setup.config.json`, `setup-report.json`
-- `router-access.json`, `user-ssh-mikrotik.txt`
-- `data/`, `*.db`, `*.tar`, `terminals/`, `tmp/`, `node_modules/`
+```
+.env*  setup.config.json  setup-report.json
+router-access.json  user-ssh-mikrotik.txt
+data/  *.db  *.tar  node_modules/  terminals/  tmp/
+backend/public/  (build artifact)
+```
 
-**Production checklist**
+### Checklist production
 
 1. Đổi `JWT_SECRET`, `ADMIN_PASSWORD`, mật khẩu MikroTik  
-2. SSH port lạ + blacklist bật  
-3. Bảo vệ `pppoe-wan` (script protect)  
-4. Hạn chế expose 8088 nếu chỉ quản trị nội bộ  
-5. Không commit secrets / password fallback trong script deploy cá nhân  
+2. SSH non-default + blacklist  
+3. Giữ `protect-pppoe-wan`  
+4. Hạn chế expose 8088 (firewall / chỉ VPN-LAN)  
+5. Không hardcode password trong script deploy public  
+6. Review audit log định kỳ  
 
 ---
 
-## Tài liệu tham khảo
+## 23. Tài liệu & License
 
 | File | Nội dung |
 |------|----------|
-| [`docs/architecture.md`](docs/architecture.md) | Layout container, routing chain, trade-offs, WS events |
+| [`docs/architecture.md`](docs/architecture.md) | Layout, routing chain, trade-offs, resource, WS (legacy notes) |
 | [`docs/routeros-commands.md`](docs/routeros-commands.md) | Lệnh RouterOS |
-| [`docs/router-access.md`](docs/router-access.md) | Ghi chú access (mẫu) |
-| [`backend/.env.example`](backend/.env.example) | Biến môi trường |
-| [`setup.config.example.json`](setup.config.example.json) | Config setup đầy đủ |
-| [`setup.config.minimal.json`](setup.config.minimal.json) | Config tối thiểu |
-| [`for-agents.md`](for-agents.md) | Ghi chú cho agent/dev |
+| [`docs/router-access.md`](docs/router-access.md) | Ghi chú access mẫu |
+| [`docs/ant-design-frontend-redesign.md`](docs/ant-design-frontend-redesign.md) | UI redesign notes |
+| [`backend/.env.example`](backend/.env.example) | Env mẫu |
+| [`setup.config.example.json`](setup.config.example.json) | Setup đầy đủ |
+| [`setup.config.minimal.json`](setup.config.minimal.json) | Setup tối thiểu |
 | [`LICENSE`](LICENSE) | MIT |
+
+---
+
+## Tóm tắt một dòng
+
+> **webuiproxymikrotik** = WebUI dual (desktop+mobile) + Fastify API + SQLite + 3proxy hub shards + MikroTik RouterOS automation, biến mỗi PPPoE thành proxy HTTP/SOCKS có IP public riêng, scale tới hàng trăm WAN, deploy 1-click Windows, giám sát realtime, quay IP & harden SSH trên chính router x86.
 
 ---
 
 ## License
 
-[MIT](LICENSE) © 2025 clonethinh
+[MIT](LICENSE) © 2025 [clonethinh](https://github.com/clonethinh)
